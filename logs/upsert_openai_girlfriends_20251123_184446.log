@@ -1,0 +1,7 @@
+[2025-11-23 18:44:46] INFO: ================================================================================
+[2025-11-23 18:44:46] INFO: OpenAI-Based Product Upsert Script Started
+[2025-11-23 18:44:46] INFO: Log file: C:\Users\Phantom Deluxe\Desktop\final server\gift-recommendation-chat\scripts\../logs\upsert_openai_girlfriends_20251123_184446.log
+[2025-11-23 18:44:46] INFO: Target Collection: girlfriends
+[2025-11-23 18:44:46] INFO: Batch Size: 20
+[2025-11-23 18:44:46] INFO: ================================================================================
+[2025-11-23 18:44:46] INFO: OpenAI-Based Product Upsert Script
