@@ -14,7 +14,8 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
+    baseURL: 'http://127.0.0.1:11434/v1',
+    apiKey: 'ollama',
 });
 
 const qdrantClient = new QdrantClient({
@@ -25,9 +26,8 @@ const qdrantClient = new QdrantClient({
 async function getEmbedding(text: string): Promise<number[]> {
     try {
         const response = await openai.embeddings.create({
-            model: "text-embedding-3-small",
+            model: "nomic-embed-text",
             input: text,
-            dimensions: 384
         });
         return response.data[0].embedding;
     } catch (error) {
@@ -37,74 +37,39 @@ async function getEmbedding(text: string): Promise<number[]> {
 }
 
 async function analyzeImage(imageUrl: string, title: string, price: string): Promise<{ category: string; description: string; keywords: string[] }> {
+    // Note: Llama 3 is text-only. For image analysis, we would need 'llava'.
+    // For now, we will rely on text analysis of the title and price.
     try {
         const response = await openai.chat.completions.create({
-            model: "gpt-4o",
+            model: "llama3",
             response_format: { type: "json_object" },
             messages: [
                 {
                     role: "user",
-                    content: [
-                        {
-                            type: "text", text: `Analyze this product image. Title: "${title}", Price: "${price}". 
-              Provide a JSON response with the following fields:
-              - "category": A high-level category dynamically determined based on the product (e.g., "Clothing", "Beauty", "Home", "Electronics", etc. - be specific but broad enough for grouping).
-              - "description": A detailed description for a gift recommendation system. Include: what it is, style, material (if visible), suitable occasion, and who it might be for (persona). Keep it concise but descriptive (2-3 sentences).
-              - "keywords": A list of 5-10 descriptive keywords that capture the essence, style, and use-case of the product.` },
-                        {
-                            type: "image_url",
-                            image_url: {
-                                "url": imageUrl,
-                            },
-                        },
-                    ],
+                    content: `Analyze this product based on its title and price. Title: "${title}", Price: "${price}".
+                    Provide a JSON response with the following fields:
+                    - "category": A high-level category dynamically determined based on the product (e.g., "Clothing", "Beauty", "Home", "Electronics", etc.).
+                    - "description": A detailed description for a gift recommendation system. Infer what it is, style, and use-case. Keep it concise but descriptive (2-3 sentences).
+                    - "keywords": A list of 5-10 descriptive keywords.
+                    
+                    IMPORTANT: Return ONLY valid JSON.`
                 },
             ],
         });
         const content = response.choices[0].message.content || "{}";
         const parsed = JSON.parse(content);
-
-        // Validation and defaults
         return {
             category: parsed.category || "Uncategorized",
             description: parsed.description || `${title} - ${price}`,
             keywords: Array.isArray(parsed.keywords) ? parsed.keywords : [title]
         };
     } catch (error) {
-        console.error(`Image analysis failed for ${imageUrl}. Falling back to text analysis.`);
-
-        // Fallback to text-only analysis
-        try {
-            const response = await openai.chat.completions.create({
-                model: "gpt-4o",
-                response_format: { type: "json_object" },
-                messages: [
-                    {
-                        role: "user",
-                        content: `Analyze this product based on its title and price. Title: "${title}", Price: "${price}".
-                        The image URL was invalid or inaccessible, so infer details from the title.
-                        Provide a JSON response with the following fields:
-                        - "category": A high-level category dynamically determined based on the product (e.g., "Clothing", "Beauty", "Home", "Electronics", etc.).
-                        - "description": A detailed description for a gift recommendation system. Infer what it is, style, and use-case. Keep it concise but descriptive (2-3 sentences).
-                        - "keywords": A list of 5-10 descriptive keywords.`
-                    },
-                ],
-            });
-            const content = response.choices[0].message.content || "{}";
-            const parsed = JSON.parse(content);
-            return {
-                category: parsed.category || "Uncategorized",
-                description: parsed.description || `${title} - ${price}`,
-                keywords: Array.isArray(parsed.keywords) ? parsed.keywords : [title]
-            };
-        } catch (fallbackError) {
-            console.error(`Text analysis also failed for ${title}:`, fallbackError);
-            return {
-                category: "Uncategorized",
-                description: `${title} - ${price}`,
-                keywords: [title]
-            };
-        }
+        console.error(`Analysis failed for ${title}:`, error);
+        return {
+            category: "Uncategorized",
+            description: `${title} - ${price}`,
+            keywords: [title]
+        };
     }
 }
 
@@ -130,7 +95,7 @@ async function main() {
     }
     const collectionName = args[collectionIndex + 1];
 
-    const dataDir = path.resolve(__dirname, '../upsert_data/data');
+    const dataDir = path.resolve(__dirname, '../upsert/data');
 
     // Find all products.csv files
     const productFiles: string[] = [];
@@ -158,7 +123,7 @@ async function main() {
         console.log(`Creating collection ${collectionName}...`);
         await qdrantClient.createCollection(collectionName, {
             vectors: {
-                size: 384,
+                size: 768, // Updated for nomic-embed-text
                 distance: 'Cosine',
             },
         });

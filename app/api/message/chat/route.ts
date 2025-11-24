@@ -113,7 +113,7 @@ export async function POST(req: Request) {
                 // 4. Intent Analysis
                 sendStatus("Analyzing your request...");
                 const intentCompletion = await openai.chat.completions.create({
-                    model: 'gpt-4o',
+                    model: 'llama3', // Switched to Llama 3
                     messages: [
                         {
                             role: 'system',
@@ -128,6 +128,8 @@ export async function POST(req: Request) {
                             - search_query: A refined query for vector search.
                             - target_collection: "girlfriends", "boyfriends", "products". Default "products".
                             - preferences: { price_min, price_max, ... }.
+                            
+                            IMPORTANT: Return ONLY valid JSON. Do not include any other text.
                             `
                         },
                         {
@@ -211,7 +213,7 @@ export async function POST(req: Request) {
                      Politely apologize and suggest a different category or ask for more details.`;
 
                 const responseCompletion = await openai.chat.completions.create({
-                    model: 'gpt-4o',
+                    model: 'llama3', // Switched to Llama 3
                     messages: [
                         { role: 'system', content: systemPrompt },
                         { role: 'user', content: message }
