@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Star } from 'lucide-react';
 
 interface FeedbackModalProps {
@@ -14,8 +15,13 @@ export default function FeedbackModal({ isOpen, onClose, onSubmit, productTitle 
     const [rating, setRating] = useState(0);
     const [reason, setReason] = useState('');
     const [feedbackType, setFeedbackType] = useState('relevancy');
+    const [mounted, setMounted] = useState(false);
 
-    if (!isOpen) return null;
+    useEffect(() => {
+        setMounted(true);
+    }, []);
+
+    if (!isOpen || !mounted) return null;
 
     const handleSubmit = () => {
         onSubmit({ rating, reason, feedback_type: feedbackType });
@@ -25,9 +31,9 @@ export default function FeedbackModal({ isOpen, onClose, onSubmit, productTitle 
         setReason('');
     };
 
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
-            <div className="glass-card w-full max-w-md rounded-2xl p-6 relative animate-in fade-in zoom-in duration-200">
+    return createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+            <div className="glass-card w-[90%] max-w-md rounded-2xl p-6 relative animate-in fade-in zoom-in duration-200">
                 <button
                     onClick={onClose}
                     className="absolute top-4 right-4 text-gray-400 hover:text-white transition-colors"
@@ -87,6 +93,7 @@ export default function FeedbackModal({ isOpen, onClose, onSubmit, productTitle 
                     </button>
                 </div>
             </div>
-        </div>
+        </div>,
+        document.body
     );
 }

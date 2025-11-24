@@ -288,11 +288,17 @@ export default function ChatInterface() {
     };
 
     const handleFeedbackSubmit = async (feedbackData: any) => {
+        // Clean messageId if it has suffixes (from history load)
+        const cleanMessageId = feedbackData.messageId.replace(/_(user|assistant)$/, '');
+
         try {
             await fetch('/api/feedback', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(feedbackData)
+                body: JSON.stringify({
+                    ...feedbackData,
+                    messageId: cleanMessageId
+                })
             });
             console.log('Feedback submitted successfully');
         } catch (error) {
@@ -302,6 +308,8 @@ export default function ChatInterface() {
 
     return (
         <div ref={containerRef} className="flex h-[100dvh] w-full glass-card rounded-none md:rounded-3xl overflow-hidden shadow-2xl border-0 md:border border-white/10 relative bg-gradient-to-br from-gray-900 via-black to-gray-900">
+            {/* Spotlight Effect */}
+            <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_50%_50%,rgba(120,50,255,0.15),transparent_50%)] z-0" />
 
             {/* Sidebar (Mobile & Desktop) */}
             <div className={`absolute inset-y-0 left-0 z-30 w-72 bg-black/95 backdrop-blur-xl border-r border-white/10 transform transition-transform duration-300 ease-in-out ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:relative md:translate-x-0 md:w-72 md:flex md:flex-col`}>

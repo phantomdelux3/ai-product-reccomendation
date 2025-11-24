@@ -21,8 +21,8 @@ export default function MessageBubble({ message, sessionId, onFeedbackSubmit }: 
 
     return (
         <div className={`flex gap-4 ${isUser ? 'flex-row-reverse' : ''} mb-8 animate-in fade-in slide-in-from-bottom-4 duration-500`}>
-            <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${isUser ? 'bg-purple-600' : 'bg-pink-600'}`}>
-                {isUser ? <User size={16} className="text-white" /> : <Bot size={16} className="text-white" />}
+            <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center overflow-hidden ${isUser ? 'bg-purple-600' : 'bg-transparent'}`}>
+                {isUser ? <User size={16} className="text-white" /> : <img src="/logo.png" alt="AI" className="w-full h-full object-cover" />}
             </div>
 
             <div className={`flex flex-col flex-1 min-w-0 ${isUser ? 'items-end' : 'items-start'}`}>

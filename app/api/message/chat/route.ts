@@ -4,6 +4,7 @@ import openai from '@/lib/openai';
 import qdrantClient from '@/lib/qdrant';
 import redisClient from '@/lib/redis';
 import { getEmbedding } from '@/lib/embeddings';
+import toons from '@/lib/toons';
 import { v4 as uuidv4 } from 'uuid';
 
 // Helper to get session context (Redis -> DB)
@@ -25,7 +26,7 @@ async function getSessionContext(sessionId: string, messageId: string) {
     const historyResult = await pool.query(
         `SELECT user_content, assistant_content FROM messages 
          WHERE session_id = $1 AND id != $2 
-         ORDER BY created_at DESC LIMIT 10`,
+         ORDER BY created_at DESC LIMIT 7`,
         [sessionId, messageId]
     );
 
@@ -101,8 +102,8 @@ export async function POST(req: Request) {
                 // 2. Store User Message
                 const messageId = uuidv4();
                 await pool.query(
-                    'INSERT INTO messages (id, session_id, user_content) VALUES ($1, $2, $3)',
-                    [messageId, sessionId, message]
+                    'INSERT INTO messages (id, session_id, user_content, is_reload) VALUES ($1, $2, $3, $4)',
+                    [messageId, sessionId, message, isReload || false]
                 );
 
                 sendStatus("Thinking...");
@@ -113,7 +114,7 @@ export async function POST(req: Request) {
                 // 4. Intent Analysis
                 sendStatus("Analyzing your request...");
                 const intentCompletion = await openai.chat.completions.create({
-                    model: 'gpt-4o',
+                    model: 'gpt-4o-mini',
                     messages: [
                         {
                             role: 'system',
@@ -123,11 +124,14 @@ export async function POST(req: Request) {
                             CONTEXT AWARENESS:
                             - If the user is refining a previous request, MERGE with previous preferences.
                             - If the user changes the topic, DISCARD previous product preferences.
+                            - Identify if critical info is missing: Who is it for? What is the occasion? What are their hobbies/interests? What is the budget?
                             
                             Return a JSON object with:
                             - search_query: A refined query for vector search.
                             - target_collection: "girlfriends", "boyfriends", "products". Default "products".
                             - preferences: { price_min, price_max, ... }.
+                            - missing_info: [] (List of missing critical info fields, e.g., ["recipient", "budget", "occasion", "interests"]).
+                            - needs_clarification: boolean (True if the user's request is too vague to give good recommendations, e.g., just "gift" or "help").
                             `
                         },
                         {
@@ -152,21 +156,32 @@ export async function POST(req: Request) {
                 }
 
                 // Step 5a: Targeted Search
+                // 5a. Check if we should ask for clarification instead of searching
+                // Only skip search if it's the VERY first message and it's extremely vague (e.g. "hi"), 
+                // OR if needs_clarification is true AND we have no history. 
+                // But usually we want to show *something*. 
+                // Let's proceed with search but the system prompt will handle the "asking" part if results are generic.
+
+                // 5b. Vector Search with Fallback
                 sendStatus(`Searching in ${targetCollection}...`);
+                const searchOffset = isReload ? 6 : 0; // Offset for reload to get different results
+
                 let searchResult = await qdrantClient.search(targetCollection, {
                     vector: embedding,
                     filter: Object.keys(filter).length > 0 ? filter : undefined,
-                    limit: 6, // Increased to 6
+                    limit: 6,
+                    offset: searchOffset,
                     with_payload: true,
                 });
 
-                // Step 5b: Fallback if empty and not already searching 'products'
+                // Fallback if empty and not already searching 'products'
                 if (searchResult.length === 0 && targetCollection !== 'products') {
                     sendStatus(`No results in ${targetCollection}, checking general products...`);
                     searchResult = await qdrantClient.search('products', {
                         vector: embedding,
                         filter: Object.keys(filter).length > 0 ? filter : undefined,
                         limit: 6,
+                        offset: searchOffset,
                         with_payload: true,
                     });
                 }
@@ -195,25 +210,37 @@ export async function POST(req: Request) {
                 }
 
                 // 6. Response Generation
+                // 6. Response Generation
                 sendStatus("Curating recommendations...");
                 const systemPrompt = products.length > 0
-                    ? `You are a witty and helpful gift recommendation assistant. 
-                     Based on the user's request and the following products, suggest the best options.
+                    ? `You are a witty, concise, and helpful gift recommendation assistant. 
+                     
+                     CONTEXT:
+                     - Missing Info: ${toons.stringify(intentData.missing_info || [])}
+                     - Needs Clarification: ${intentData.needs_clarification}
                      
                      GUIDELINES:
-                     - Be CONCISE and WITTY.
-                     - STRICTLY use ONLY the provided products.
-                     - If the user's request was vague (e.g., just "gift"), ask ONE clarifying question to narrow it down (e.g., "Who is this for?" or "What's the occasion?").
-                     - Highlight WHY these specific products are good matches.
+                     - Be SHORT and SPECIFIC.
+                     - DO NOT LIST products or links. They are already shown to the user in the UI.
+                     - Refer to the products generally (e.g., "these options", "the skincare set").
+                     - Focus on WHY they are good matches or ask clarifying questions.
+                     - If 'needs_clarification' is true, ASK for missing info (recipient, occasion, budget).
+                     - Example: "I found some great skincare sets! The facial cleanser is perfect for sensitive skin. Btw, is this for a birthday?"
                      
-                     Products found: ${JSON.stringify(products)}`
+                     Products found (Internal Use Only): ${toons.stringify(products)}`
                     : `You are a helpful gift recommendation assistant. The user asked for gifts, but no relevant products were found.
-                     Politely apologize and suggest a different category or ask for more details.`;
+                     
+                     GUIDELINES:
+                     - Be SHORT and conversational.
+                     - Analyze the user's request to suggest RELEVANT categories.
+                     - Example: "I couldn't find specific matches, but for a [Persona], have you considered [Category 1]?"
+                     - ASK for more details: "Tell me a bit more about what they like or your budget."`;
 
                 const responseCompletion = await openai.chat.completions.create({
-                    model: 'gpt-4o',
+                    model: 'gpt-4o-mini',
                     messages: [
                         { role: 'system', content: systemPrompt },
+                        ...history.map((msg: any) => [{ role: 'user', content: msg.user }, { role: 'assistant', content: msg.assistant }]).flat(), // Inject history
                         { role: 'user', content: message }
                     ]
                 });

@@ -39,7 +39,7 @@ async function getEmbedding(text: string): Promise<number[]> {
 async function analyzeImage(imageUrl: string, title: string, price: string): Promise<{ category: string; description: string; keywords: string[] }> {
     try {
         const response = await openai.chat.completions.create({
-            model: "gpt-4o",
+            model: "gpt-4o-mini",
             response_format: { type: "json_object" },
             messages: [
                 {
@@ -76,7 +76,7 @@ async function analyzeImage(imageUrl: string, title: string, price: string): Pro
         // Fallback to text-only analysis
         try {
             const response = await openai.chat.completions.create({
-                model: "gpt-4o",
+                model: "gpt-4o-mini",
                 response_format: { type: "json_object" },
                 messages: [
                     {
