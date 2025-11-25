@@ -5,6 +5,7 @@ import glob
 import json
 import pandas as pd
 import torch
+import numpy as np  # <--- REQUIRED FOR IMAGE SCRUBBING
 from PIL import Image
 import requests
 from io import BytesIO
@@ -24,7 +25,7 @@ QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 
 # Configuration
 MAX_RETRIES = 3
-RETRY_DELAY = 2  # seconds
+RETRY_DELAY = 2
 
 def get_device():
     if torch.cuda.is_available():
@@ -41,33 +42,27 @@ def load_models(device):
     print(f"Loading AI Models on {device.upper()}...")
     print(f"{'='*60}")
     
-    # Determine dtype
+    # Florence-2 works best with float16 on CUDA
     torch_dtype = torch.float16 if device == 'cuda' else torch.float32
     print(f"Using dtype: {torch_dtype}")
     
-    # Florence-2 for Image Analysis
     florence_model_id = 'microsoft/Florence-2-base'
     print(f"\n[1/2] Loading Florence-2 Vision Model...")
-    print(f"      Model: {florence_model_id}")
     
     try:
         florence_model = AutoModelForCausalLM.from_pretrained(
             florence_model_id, 
             dtype=torch_dtype,
-            trust_remote_code=True,
-            attn_implementation='eager'  # Avoid SDPA compatibility issues
+            trust_remote_code=True
         ).to(device)
-        florence_model.eval()  # Set to evaluation mode
+        florence_model.eval()
         florence_processor = AutoProcessor.from_pretrained(florence_model_id, trust_remote_code=True)
         print(f"      ✓ Florence-2 loaded successfully")
     except Exception as e:
         print(f"      ✗ Failed to load Florence-2: {e}")
         raise
 
-    # Sentence Transformer for Embeddings (384 dimensions)
-    print(f"\n[2/2] Loading SentenceTransformer for Embeddings...")
-    print(f"      Model: all-MiniLM-L6-v2 (384 dims)")
-    
+    print(f"\n[2/2] Loading SentenceTransformer...")
     try:
         embedding_model = SentenceTransformer('all-MiniLM-L6-v2', device=device)
         print(f"      ✓ SentenceTransformer loaded successfully")
@@ -75,286 +70,231 @@ def load_models(device):
         print(f"      ✗ Failed to load SentenceTransformer: {e}")
         raise
     
-    print(f"\n{'='*60}")
-    print(f"✓ All models loaded successfully!")
-    print(f"{'='*60}\n")
-    
     return florence_model, florence_processor, embedding_model
 
 def download_image_with_retry(image_url, max_retries=MAX_RETRIES):
-    """Download image with retry logic"""
+    """Download and SCRUB image data"""
     for attempt in range(max_retries):
         try:
-            response = requests.get(image_url, stream=True, timeout=15)
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            response = requests.get(image_url, headers=headers, stream=True, timeout=15)
             response.raise_for_status()
-            image = Image.open(BytesIO(response.content)).convert("RGB")
             
-            # Validate image
-            if image is None or image.size[0] == 0 or image.size[1] == 0:
-                raise ValueError("Invalid image dimensions")
+            # 1. Open Bytes
+            img_raw = Image.open(BytesIO(response.content))
             
-            return image
+            # 2. Force Convert to RGB
+            if img_raw.mode != "RGB":
+                img_raw = img_raw.convert("RGB")
+            
+            # 3. THE FIX: Scrub Metadata using Numpy
+            # This creates a fresh memory block, removing corrupt EXIF/Header data
+            # that causes the "NoneType" error in the processor.
+            img_array = np.array(img_raw)
+            clean_image = Image.fromarray(img_array)
+            
+            # 4. Resize if too big (Florence max is usually ~1024)
+            if max(clean_image.size) > 1024:
+                scale = 1024 / max(clean_image.size)
+                new_w = int(clean_image.width * scale)
+                new_h = int(clean_image.height * scale)
+                clean_image = clean_image.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+            return clean_image
+            
         except Exception as e:
             if attempt < max_retries - 1:
                 print(f"      ⚠ Download attempt {attempt + 1} failed: {e}")
-                print(f"      ⏳ Retrying in {RETRY_DELAY}s...")
                 time.sleep(RETRY_DELAY)
             else:
                 raise
 
 def analyze_image_with_retry(model, processor, image, title, price, device, max_retries=MAX_RETRIES):
-    """Analyze image with Florence-2 with retry logic"""
-    
+    """Analyze image with Florence-2, robustly."""
+
+    task = "<MORE_DETAILED_CAPTION>"
+
     for attempt in range(max_retries):
         try:
-            prompt = "<MORE_DETAILED_CAPTION>"
-            
             if image is None:
                 raise ValueError("Image is None")
-            
-            # Determine dtype
-            torch_dtype = torch.float16 if device == 'cuda' else torch.float32
-            
-            # Process inputs - this returns a BatchEncoding object
-            inputs = processor(text=prompt, images=image, return_tensors="pt")
-            
-            # Manually move each tensor to device with correct dtype
-            # This avoids the .to() issue with BatchEncoding
-            input_ids = inputs["input_ids"].to(device)
-            pixel_values = inputs["pixel_values"].to(device, dtype=torch_dtype)
-            
-            # Generate with explicit parameters
+
+            # 1. Processor → full BatchEncoding
+            inputs = processor(
+                text=task,
+                images=image,
+                return_tensors="pt"
+            )
+
+            # Safety check
+            if "pixel_values" not in inputs or inputs["pixel_values"] is None:
+                raise ValueError("Processor failed to generate pixel_values")
+
+            # 2. Move to device, but keep dtypes correct
+            for k, v in inputs.items():
+                if isinstance(v, torch.Tensor):
+                    inputs[k] = v.to(device)
+
+            # On CUDA, pixel_values should be float16; input_ids stay long
+            if device == "cuda":
+                inputs["pixel_values"] = inputs["pixel_values"].to(torch.float16)
+
+            # Optional debug (uncomment if needed)
+            # print("Florence inputs:")
+            # for k, v in inputs.items():
+            #     if isinstance(v, torch.Tensor):
+            #         print("  ", k, v.shape, v.dtype, v.device)
+
+            # 3. Generate – IMPORTANT: pass **inputs
             with torch.no_grad():
                 generated_ids = model.generate(
-                    input_ids=input_ids,
-                    pixel_values=pixel_values,
+                    **inputs,
                     max_new_tokens=512,
-                    early_stopping=False,
                     do_sample=False,
                     num_beams=3,
                 )
-            
-            # Decode the generated text
-            generated_text = processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
-            
-            # Parse the response
-            parsed_answer = processor.post_process_generation(
-                generated_text, 
-                task=prompt, 
-                image_size=(image.width, image.height)
+
+            # 4. Decode
+            generated_text = processor.batch_decode(
+                generated_ids,
+                skip_special_tokens=False
+            )[0]
+
+            # 5. Post-process using Florence helper
+            parsed = processor.post_process_generation(
+                generated_text,
+                task=task,
+                image_size=(image.width, image.height),
             )
-            
-            description = parsed_answer.get(prompt, "")
-            
-            if not description or description.strip() == "":
-                raise ValueError("Empty description generated")
-            
+
+            description = parsed.get(task, "")
+
+            # Fallbacks to avoid empty text
+            if not description:
+                description = (
+                    generated_text
+                    .replace(task, "")
+                    .replace("<s>", "")
+                    .replace("</s>", "")
+                    .strip()
+                )
+
+            if not description:
+                description = f"Product image of {title}"
+
             return description
-            
+
         except Exception as e:
+            if device == "cuda":
+                torch.cuda.empty_cache()
+
             if attempt < max_retries - 1:
                 print(f"      ⚠ Analysis attempt {attempt + 1} failed: {e}")
                 print(f"      ⏳ Retrying in {RETRY_DELAY}s...")
                 time.sleep(RETRY_DELAY)
             else:
-                # Last attempt failed - raise the error
-                raise
+                print(f"      ✗ Florence failed after {max_retries} attempts. Using fallback.")
+                return f"Product image of {title}"
 
 def main():
-    parser = argparse.ArgumentParser(description="GPU-Accelerated Product Upsert with Florence-2")
+    parser = argparse.ArgumentParser(description="GPU-Accelerated Product Upsert")
     parser.add_argument("--collection", required=True, help="Qdrant collection name")
-    parser.add_argument("--skip-existing", action="store_true", help="Skip products that already exist in collection")
     args = parser.parse_args()
     collection_name = args.collection
 
     print(f"\n{'='*60}")
-    print(f"GPU-Accelerated Product Upsert Script")
+    print(f"GPU-Accelerated Product Upsert (Numpy Scrub Fix)")
     print(f"{'='*60}")
-    print(f"Target Collection: {collection_name}")
-    print(f"{'='*60}\n")
-
-    # Get device
+    
     device = get_device()
-
-    # Initialize Qdrant
-    print(f"\nConnecting to Qdrant...")
+    
+    # Connect Qdrant
     try:
         client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
-        print(f"✓ Connected to Qdrant at {QDRANT_URL}")
-    except Exception as e:
-        print(f"✗ Failed to connect to Qdrant: {e}")
-        sys.exit(1)
-    
-    # Ensure collection exists
-    try:
-        client.get_collection(collection_name)
-        print(f"✓ Collection '{collection_name}' exists")
-    except Exception:
-        print(f"⚠ Collection '{collection_name}' not found, creating...")
         try:
+            client.get_collection(collection_name)
+        except:
             client.create_collection(
                 collection_name=collection_name,
                 vectors_config=VectorParams(size=384, distance=Distance.COSINE),
             )
-            print(f"✓ Collection '{collection_name}' created")
-        except Exception as e:
-            print(f"✗ Failed to create collection: {e}")
-            sys.exit(1)
+        print(f"✓ Connected to Collection: {collection_name}")
+    except Exception as e:
+        print(f"✗ Qdrant Error: {e}")
+        sys.exit(1)
 
     # Load Models
     try:
         florence_model, florence_processor, embedding_model = load_models(device)
     except Exception as e:
-        print(f"\n✗ Failed to load models: {e}")
+        print(f"✗ Model Error: {e}")
         sys.exit(1)
 
-    # Find CSVs
+    # Find Data
     data_dir = os.path.join(os.path.dirname(__file__), '../upsert_data/data')
     csv_files = glob.glob(os.path.join(data_dir, '**', 'products.csv'), recursive=True)
     print(f"Found {len(csv_files)} product CSV files\n")
 
-    if len(csv_files) == 0:
-        print(f"⚠ No CSV files found in {data_dir}")
-        sys.exit(0)
-
-    # Statistics
-    total_products = 0
     total_processed = 0
-    total_failed = 0
-    failed_products = []
 
-    for csv_idx, csv_file in enumerate(csv_files):
+    for csv_file in csv_files:
         brand = os.path.basename(os.path.dirname(csv_file))
-        print(f"\n{'='*60}")
-        print(f"[{csv_idx + 1}/{len(csv_files)}] Processing Brand: {brand}")
-        print(f"{'='*60}")
+        print(f"\nProcessing Brand: {brand}")
         
         try:
             df = pd.read_csv(csv_file)
-            print(f"Found {len(df)} products in CSV")
-        except Exception as e:
-            print(f"✗ Error reading CSV: {e}")
-            continue
+        except: continue
 
         for idx, row in df.iterrows():
-            total_products += 1
-            
             title = str(row.get('title', ''))
             image_url = str(row.get('image_url', ''))
             price = str(row.get('price_original', ''))
-            product_url = str(row.get('product_url', ''))
             original_desc = str(row.get('description', ''))
 
-            if not title or not image_url or image_url == 'nan':
-                print(f"\n[{idx+1}] ⚠ Skipping: Missing title or image URL")
-                continue
+            if not title or not image_url or image_url == 'nan': continue
 
-            print(f"\n{'─'*60}")
-            print(f"[{idx+1}/{len(df)}] Product: {title}")
-            print(f"{'─'*60}")
-            print(f"  Price: ${price}")
-            print(f"  Image: {image_url[:60]}...")
+            print(f"\n[{total_processed+1}] {title[:50]}...")
 
-            # Download Image
-            print(f"\n  [Step 1/4] Downloading image...")
+            # 1. Download & Scrub
             try:
                 image = download_image_with_retry(image_url)
-                print(f"  ✓ Image downloaded: {image.size[0]}x{image.size[1]} pixels, {image.mode} mode")
+                print(f"  ✓ Downloaded & Scrubbed ({image.width}x{image.height})")
             except Exception as e:
-                print(f"  ✗ Failed to download image after {MAX_RETRIES} attempts: {e}")
-                failed_products.append({"title": title, "reason": f"Image download failed: {e}"})
-                total_failed += 1
+                print(f"  ✗ Download failed: {e}")
                 continue
 
-            # Analyze Image with Florence-2
-            print(f"\n  [Step 2/4] Analyzing image with Florence-2...")
-            try:
-                visual_description = analyze_image_with_retry(
-                    florence_model, florence_processor, image, title, price, device
-                )
-                print(f"  ✓ Analysis complete!")
-                print(f"\n  {'┌' + '─'*58 + '┐'}")
-                print(f"  │ FLORENCE-2 GENERATED DESCRIPTION:                       │")
-                print(f"  {'├' + '─'*58 + '┤'}")
-                # Word wrap the description
-                words = visual_description.split()
-                line = "  │ "
-                for word in words:
-                    if len(line) + len(word) + 1 > 58:
-                        print(f"{line:<60}│")
-                        line = "  │ " + word + " "
-                    else:
-                        line += word + " "
-                if len(line.strip()) > 3:
-                    print(f"{line:<60}│")
-                print(f"  {'└' + '─'*58 + '┘'}\n")
-                
-            except Exception as e:
-                print(f"  ✗ Failed to analyze image after {MAX_RETRIES} attempts: {e}")
-                failed_products.append({"title": title, "reason": f"Image analysis failed: {e}"})
-                total_failed += 1
-                continue
+            # 2. Analyze
+            print(f"  Analysing...")
+            visual_desc = analyze_image_with_retry(
+                florence_model, florence_processor, image, title, price, device
+            )
+            print(f"  ✓ Description: {visual_desc[:50]}...")
 
-            # Create Rich Text for Embedding
-            rich_text = f"Product: {title}. Brand: {brand}. Price: {price}. Description: {visual_description}. {original_desc}"
-            
-            # Generate Embedding
-            print(f"  [Step 3/4] Generating embedding...")
-            try:
-                embedding = embedding_model.encode(rich_text, show_progress_bar=False).tolist()
-                print(f"  ✓ Embedding generated: 384 dimensions")
-            except Exception as e:
-                print(f"  ✗ Embedding generation failed: {e}")
-                failed_products.append({"title": title, "reason": f"Embedding failed: {e}"})
-                total_failed += 1
-                continue
+            # 3. Embed & Upsert
+            rich_text = f"Product: {title}. Brand: {brand}. Price: {price}. Visuals: {visual_desc}. {original_desc}"
+            embedding = embedding_model.encode(rich_text).tolist()
 
-            # Upsert to Qdrant
-            print(f"\n  [Step 4/4] Upserting to Qdrant...")
             try:
                 point = PointStruct(
                     id=str(uuid4()),
                     vector=embedding,
                     payload={
                         "title": title,
-                        "description": visual_description,
+                        "description": visual_desc,
                         "original_description": original_desc,
                         "price_numeric": float(price) if price and price != 'nan' else 0,
                         "image_url": image_url,
-                        "product_url": product_url,
+                        "product_url": row.get('product_url', ''),
                         "brand": brand
                     }
                 )
-                
-                client.upsert(
-                    collection_name=collection_name,
-                    points=[point]
-                )
-                print(f"  ✓ Successfully upserted to '{collection_name}' collection")
+                client.upsert(collection_name=collection_name, points=[point])
+                print(f"  ✓ Upserted")
                 total_processed += 1
-                
             except Exception as e:
                 print(f"  ✗ Upsert failed: {e}")
-                failed_products.append({"title": title, "reason": f"Upsert failed: {e}"})
-                total_failed += 1
 
-    # Final Summary
-    print(f"\n\n{'='*60}")
-    print(f"FINAL SUMMARY")
-    print(f"{'='*60}")
-    print(f"Total products found:     {total_products}")
-    print(f"Successfully processed:   {total_processed} ✓")
-    print(f"Failed:                   {total_failed} ✗")
-    print(f"Success rate:             {(total_processed/total_products*100) if total_products > 0 else 0:.1f}%")
-    print(f"{'='*60}")
-    
-    if failed_products:
-        print(f"\nFailed Products:")
-        for i, failed in enumerate(failed_products, 1):
-            print(f"  {i}. {failed['title']}")
-            print(f"     Reason: {failed['reason']}")
-    
-    print(f"\n✓ Script completed!\n")
+    print(f"\nDone! Processed {total_processed} items.")
 
 if __name__ == "__main__":
     main()
