@@ -21,11 +21,11 @@ async function main() {
             const info = await qdrantClient.getCollection(collection.name);
             console.log(`\nCollection: ${collection.name}`);
             console.log(`- Points: ${info.points_count}`);
-            console.log(`- Vectors Count: ${info.vectors_count}`);
+
             console.log(`- Status: ${info.status}`);
 
             // Peek at one item
-            if (info.points_count > 0) {
+            if ((info.points_count ?? 0) > 0) {
                 const search = await qdrantClient.scroll(collection.name, { limit: 1, with_payload: true });
                 if (search.points.length > 0) {
                     console.log(`- Sample Payload:`, JSON.stringify(search.points[0].payload, null, 2));

@@ -20,7 +20,7 @@ async function main() {
             const info = await qdrantClient.getCollection(name);
             console.log(`Collection: ${name}`);
             console.log(`- Status: ${info.status}`);
-            console.log(`- Vectors Count: ${info.vectors_count}`);
+            console.log(`- Vectors Count: ${info.points_count}`);
             console.log(`- Config:`, JSON.stringify(info.config.params.vectors, null, 2));
         } catch (e) {
             console.log(`Collection ${name} does not exist.`);

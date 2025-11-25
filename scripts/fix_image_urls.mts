@@ -17,7 +17,7 @@ async function fixImageUrls() {
         console.log(`Processing collection: ${collectionName}`);
 
         try {
-            let offset: string | undefined = undefined;
+            let offset: string | number | Record<string, unknown> | undefined = undefined;
             let totalFixed = 0;
 
             while (true) {
@@ -56,7 +56,7 @@ async function fixImageUrls() {
                     console.log(`  Fixed ${pointsToUpdate.length} images in this batch.`);
                 }
 
-                offset = result.next_page_offset;
+                offset = result.next_page_offset ?? undefined;
                 if (!offset) break;
             }
 
