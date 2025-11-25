@@ -46,3 +46,19 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.3);
 }
+
+@property --border-angle {
+  syntax: "<angle>";
+  inherits: true;
+  initial-value: 0turn;
+}
+
+@keyframes border {
+  to {
+    --border-angle: 1turn;
+  }
+}
+
+.animate-border {
+  animation: border 4s linear infinite;
+}

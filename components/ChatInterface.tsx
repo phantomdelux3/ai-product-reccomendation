@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Send, Sparkles, Menu, X, MessageSquare, Plus, RefreshCw } from 'lucide-react';
 import MessageBubble from './MessageBubble';
 import GradientBackground from './GradientBackground';
+import NewChatCard from './NewChatCard';
 import { v4 as uuidv4 } from 'uuid';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
@@ -308,7 +309,7 @@ export default function ChatInterface() {
     };
 
     return (
-        <div ref={containerRef} className="flex h-[100dvh] w-full glass-card rounded-none md:rounded-3xl overflow-hidden shadow-2xl border-0 md:border border-white/10 relative bg-black">
+        <div ref={containerRef} className="flex h-full w-full glass-card rounded-none md:rounded-3xl overflow-hidden shadow-2xl border-0 md:border border-white/10 relative bg-black">
             {/* Dynamic Shader Gradient Background */}
             <GradientBackground />
 
@@ -322,13 +323,7 @@ export default function ChatInterface() {
                 </div>
 
                 <div className="p-4">
-                    <button
-                        onClick={startNewChat}
-                        className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-purple-600 to-pink-600 rounded-xl text-white font-medium shadow-lg hover:shadow-purple-500/25 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200"
-                    >
-                        <Plus size={20} />
-                        <span>New Chat</span>
-                    </button>
+                    <NewChatCard onClick={startNewChat} />
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
