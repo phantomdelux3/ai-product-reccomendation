@@ -5,6 +5,7 @@ import { Send, Sparkles, Menu, X, MessageSquare, Plus, RefreshCw } from 'lucide-
 import MessageBubble from './MessageBubble';
 import GradientBackground from './GradientBackground';
 import NewChatCard from './NewChatCard';
+import EmptyChatState from './EmptyChatState';
 import { v4 as uuidv4 } from 'uuid';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
@@ -39,10 +40,12 @@ export default function ChatInterface() {
     };
 
     useEffect(() => {
-        scrollToBottom();
+        if (messages.length > 0) {
+            scrollToBottom();
+        }
     }, [messages]);
 
-    // GSAP Typing Animation for Placeholder & Rotating Text
+    // GSAP Typing Animation for Placeholder
     useGSAP(() => {
         // Placeholder Animation
         const placeholders = ["Romantic anniversary gifts for girlfriend", "What to gift a boyfriend who loves gaming", "Unique gardening gifts for mom", "Minimalist room decor gifts for college students"];
@@ -95,50 +98,6 @@ export default function ChatInterface() {
 
         typeText();
 
-        // Rotating Text Animation
-        const rotatingWords = ["your Girlfriend", "Boyfriend", "Christmas", "New Year", "Best Friend", "Birthday Gift"];
-        let wordIdx = 0;
-
-        const rotateText = () => {
-            const target = document.getElementById('rotating-text');
-            if (!target) return;
-
-            const tl = gsap.timeline({
-                onComplete: () => {
-                    gsap.delayedCall(2, () => {
-                        wordIdx = (wordIdx + 1) % rotatingWords.length;
-                        rotateText();
-                    });
-                }
-            });
-
-            tl.to(target, {
-                duration: 0.5,
-                opacity: 0,
-                y: -20,
-                ease: "power2.in",
-                onComplete: () => {
-                    target.textContent = rotatingWords[wordIdx];
-                    gsap.set(target, { y: 20 });
-                }
-            })
-                .to(target, {
-                    duration: 0.5,
-                    opacity: 1,
-                    y: 0,
-                    ease: "back.out(1.7)"
-                });
-        };
-
-        // Start rotating text after a short delay to sync with fade-in
-        gsap.delayedCall(1, rotateText);
-
-        // Main Logo Animation (slide down from top)
-        gsap.fromTo("#main-logo",
-            { y: -30, opacity: 0 },
-            { y: 0, opacity: 1, duration: 1, ease: "power3.out", delay: 0.1 }
-        );
-
     }, { scope: containerRef });
 
     // Initialize Guest ID and fetch sessions
@@ -172,7 +131,7 @@ export default function ChatInterface() {
             if (data.messages) {
                 setMessages(data.messages);
                 setSessionId(sId);
-                setIsSidebarOpen(false); // Close sidebar on mobile after selection
+                setIsSidebarOpen(false); // Close sidebar after selection
             }
         } catch (error) {
             console.error('Error loading session:', error);
@@ -313,11 +272,11 @@ export default function ChatInterface() {
             {/* Dynamic Shader Gradient Background */}
             <GradientBackground />
 
-            {/* Sidebar (Mobile & Desktop) */}
-            <div className={`absolute inset-y-0 left-0 z-30 w-72 bg-black/95 backdrop-blur-xl border-r border-white/10 transform transition-transform duration-300 ease-in-out ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:relative md:translate-x-0 md:w-72 md:flex md:flex-col`}>
+            {/* Sidebar (Mobile & Desktop - Always Hidden by Default) */}
+            <div className={`absolute inset-y-0 left-0 z-30 w-72 bg-black/95 backdrop-blur-xl border-r border-white/10 transform transition-transform duration-300 ease-in-out ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
                 <div className="p-6 border-b border-white/10 flex justify-between items-center">
                     <h2 className="text-white font-bold text-xl tracking-tight">History</h2>
-                    <button onClick={() => setIsSidebarOpen(false)} className="md:hidden text-gray-400 hover:text-white transition-colors">
+                    <button onClick={() => setIsSidebarOpen(false)} className="text-gray-400 hover:text-white transition-colors">
                         <X size={24} />
                     </button>
                 </div>
@@ -340,10 +299,10 @@ export default function ChatInterface() {
                 </div>
             </div>
 
-            {/* Overlay for mobile sidebar */}
+            {/* Overlay for sidebar */}
             {isSidebarOpen && (
                 <div
-                    className="absolute inset-0 bg-black/60 backdrop-blur-sm z-20 md:hidden"
+                    className="absolute inset-0 bg-black/60 backdrop-blur-sm z-20"
                     onClick={() => setIsSidebarOpen(false)}
                 />
             )}
@@ -352,7 +311,7 @@ export default function ChatInterface() {
             <div className="flex-1 flex flex-col h-full relative w-full overflow-hidden">
                 {/* Header */}
                 <div className="flex-none p-4 md:p-6 border-b border-white/10 bg-black/20 backdrop-blur-md flex items-center gap-4 z-10">
-                    <button onClick={() => setIsSidebarOpen(true)} className="md:hidden text-white p-2 hover:bg-white/10 rounded-lg transition-colors">
+                    <button onClick={() => setIsSidebarOpen(true)} className="text-white p-2 hover:bg-white/10 rounded-lg transition-colors">
                         <Menu size={24} />
                     </button>
                     <div className="w-10 h-10 md:w-12 md:h-12 rounded-xl bg-white/5 flex items-center justify-center shadow-lg ring-1 ring-white/10 overflow-hidden">
@@ -367,18 +326,7 @@ export default function ChatInterface() {
                 {/* Messages Area */}
                 <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6 space-y-6 scroll-smooth [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
                     {messages.length === 0 && (
-                        <div className="h-full flex flex-col items-center justify-center text-center p-8 animate-in fade-in zoom-in duration-700">
-                            <div id="main-logo" className="w-64 md:w-80 mb-8 opacity-0">
-                                <img src="/toastdlogo.png" alt="Toastd" className="w-full h-auto drop-shadow-2xl" />
-                            </div>
-                            <h2 className="flex flex-col items-center text-4xl md:text-6xl font-bold text-white mb-6 tracking-tight gap-3">
-                                <span className="opacity-90">Find gifts for</span>
-                                <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-pink-500 to-purple-400 h-[1.3em] pb-2" id="rotating-text">your Girlfriend</span>
-                            </h2>
-                            <p className="text-gray-400 max-w-md text-lg md:text-xl leading-relaxed font-light">
-                                I can help you find the perfect gift based on occasion, interests, and budget.
-                            </p>
-                        </div>
+                        <EmptyChatState />
                     )}
 
                     {messages.map((msg) => (
