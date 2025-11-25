@@ -268,7 +268,7 @@ export default function ChatInterface() {
     };
 
     return (
-        <div ref={containerRef} className="flex h-full w-full glass-card rounded-none md:rounded-3xl overflow-hidden shadow-2xl border-0 md:border border-white/10 relative bg-black">
+        <div ref={containerRef} className="flex h-full w-full glass-card rounded-xl overflow-hidden shadow-2xl border-0 md:border border-white/10 relative bg-black">
             {/* Dynamic Shader Gradient Background */}
             <GradientBackground />
 
