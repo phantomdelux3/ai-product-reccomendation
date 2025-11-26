@@ -324,7 +324,10 @@ export default function ChatInterface() {
                 </div>
 
                 {/* Messages Area */}
-                <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6 space-y-6 scroll-smooth [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
+                <div className="flex-1 overflow-y-auto overflow-x-hidden scroll-smooth [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
+                    <div className="mx-auto w-full max-w-3xl p-4 md:p-6 space-y-6">
+
+                     
                     {messages.length === 0 && (
                         <EmptyChatState />
                     )}
@@ -356,6 +359,7 @@ export default function ChatInterface() {
                         </div>
                     )}
                     <div ref={messagesEndRef} />
+                    </div>
                 </div>
 
                 {/* Input Area */}
