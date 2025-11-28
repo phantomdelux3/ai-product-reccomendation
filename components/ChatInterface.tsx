@@ -15,6 +15,7 @@ interface Message {
     role: 'user' | 'assistant';
     content: string;
     products?: any[];
+    toastdProducts?: any[];
 }
 
 interface Session {
@@ -29,6 +30,9 @@ export default function ChatInterface() {
     const [isLoading, setIsLoading] = useState(false);
     const [sessionId, setSessionId] = useState<string>('');
     const [guestId, setGuestId] = useState<string>('');
+    const [reloadCount, setReloadCount] = useState(0);
+    const [seenProductIds, setSeenProductIds] = useState<Set<string>>(new Set());
+    const [seenBrands, setSeenBrands] = useState<Set<string>>(new Set());
     const [sessions, setSessions] = useState<Session[]>([]);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -143,6 +147,9 @@ export default function ChatInterface() {
     const startNewChat = () => {
         setSessionId('');
         setMessages([]);
+        setReloadCount(0);
+        setSeenProductIds(new Set());
+        setSeenBrands(new Set());
         setIsSidebarOpen(false);
     };
 
@@ -165,6 +172,9 @@ export default function ChatInterface() {
         setThinkingStatus("Thinking...");
 
         if (!isReload) {
+            setReloadCount(0); // Reset on new message
+            setSeenProductIds(new Set()); // Reset seen products
+            setSeenBrands(new Set()); // Reset seen brands
             const tempUserMessage: Message = {
                 id: Date.now().toString(),
                 role: 'user',
@@ -172,6 +182,8 @@ export default function ChatInterface() {
             };
             setMessages(prev => [...prev, tempUserMessage]);
             setInput('');
+        } else {
+            setReloadCount(prev => prev + 1); // Increment on reload
         }
 
         try {
@@ -182,7 +194,10 @@ export default function ChatInterface() {
                     message: messageToSend,
                     sessionId: sessionId || undefined,
                     guestId,
-                    isReload
+                    isReload,
+                    reloadCount: isReload ? reloadCount + 1 : 0,
+                    excludeIds: Array.from(seenProductIds),
+                    seenBrands: Array.from(seenBrands)
                 })
             });
 
@@ -219,8 +234,28 @@ export default function ChatInterface() {
                                 id: data.messageId,
                                 role: 'assistant',
                                 content: data.assistantResponse,
-                                products: data.products
+                                products: data.products,
+                                toastdProducts: data.toastdProducts
                             };
+
+                            // Update seen products and brands
+                            const newSeenIds = new Set(seenProductIds);
+                            const newSeenBrands = new Set(seenBrands);
+
+                            if (data.products) {
+                                data.products.forEach((p: any) => {
+                                    newSeenIds.add(p.id);
+                                    if (p.payload?.brand) newSeenBrands.add(p.payload.brand);
+                                });
+                            }
+                            if (data.toastdProducts) {
+                                data.toastdProducts.forEach((p: any) => {
+                                    newSeenIds.add(p.id);
+                                    if (p.payload?.brand) newSeenBrands.add(p.payload.brand);
+                                });
+                            }
+                            setSeenProductIds(newSeenIds);
+                            setSeenBrands(newSeenBrands);
 
                             setMessages(prev => [...prev, assistantMessage]);
                             setThinkingStatus(''); // Clear status on completion
@@ -327,38 +362,40 @@ export default function ChatInterface() {
                 <div className="flex-1 overflow-y-auto overflow-x-hidden scroll-smooth [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
                     <div className="mx-auto w-full max-w-3xl p-4 md:p-6 space-y-6">
 
-                     
-                    {messages.length === 0 && (
-                        <EmptyChatState />
-                    )}
 
-                    {messages.map((msg) => (
-                        <MessageBubble
-                            key={msg.id}
-                            message={msg}
-                            sessionId={sessionId}
-                            onFeedbackSubmit={handleFeedbackSubmit}
-                        />
-                    ))}
-
-                    {thinkingStatus && (
-                        <div className="flex gap-4 mb-8 px-2 items-center animate-fade-in">
-                            <div className="w-8 h-8 rounded-full bg-gradient-to-r from-purple-600 to-pink-600 flex items-center justify-center shadow-lg shadow-purple-500/20">
-                                <Sparkles size={16} className="text-white animate-spin-slow" />
+                        {messages.length === 0 && (
+                            <div className="flex-1 flex items-center justify-center h-full min-h-[60vh]">
+                                <EmptyChatState />
                             </div>
-                            <div className="glass px-6 py-3 rounded-2xl rounded-tl-none border border-white/10 bg-white/5 backdrop-blur-md flex items-center gap-3">
-                                <div className="flex gap-1">
-                                    <span className="w-1.5 h-1.5 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '0s' }}></span>
-                                    <span className="w-1.5 h-1.5 bg-pink-400 rounded-full animate-bounce" style={{ animationDelay: '0.15s' }}></span>
-                                    <span className="w-1.5 h-1.5 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }}></span>
+                        )}
+
+                        {messages.map((msg) => (
+                            <MessageBubble
+                                key={msg.id}
+                                message={msg}
+                                sessionId={sessionId}
+                                onFeedbackSubmit={handleFeedbackSubmit}
+                            />
+                        ))}
+
+                        {thinkingStatus && (
+                            <div className="flex gap-4 mb-8 px-2 items-center animate-fade-in">
+                                <div className="w-8 h-8 rounded-full bg-gradient-to-r from-purple-600 to-pink-600 flex items-center justify-center shadow-lg shadow-purple-500/20">
+                                    <Sparkles size={16} className="text-white animate-spin-slow" />
                                 </div>
-                                <span className="text-sm font-medium text-transparent bg-clip-text bg-gradient-to-r from-purple-300 via-pink-300 to-purple-300 animate-pulse">
-                                    {thinkingStatus}
-                                </span>
+                                <div className="glass px-6 py-3 rounded-2xl rounded-tl-none border border-white/10 bg-white/5 backdrop-blur-md flex items-center gap-3">
+                                    <div className="flex gap-1">
+                                        <span className="w-1.5 h-1.5 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '0s' }}></span>
+                                        <span className="w-1.5 h-1.5 bg-pink-400 rounded-full animate-bounce" style={{ animationDelay: '0.15s' }}></span>
+                                        <span className="w-1.5 h-1.5 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }}></span>
+                                    </div>
+                                    <span className="text-sm font-medium text-transparent bg-clip-text bg-gradient-to-r from-purple-300 via-pink-300 to-purple-300 animate-pulse">
+                                        {thinkingStatus}
+                                    </span>
+                                </div>
                             </div>
-                        </div>
-                    )}
-                    <div ref={messagesEndRef} />
+                        )}
+                        <div ref={messagesEndRef} />
                     </div>
                 </div>
 

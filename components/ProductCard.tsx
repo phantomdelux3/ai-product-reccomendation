@@ -20,12 +20,14 @@ interface ProductCardProps {
     sessionId: string;
     messageId: string;
     onFeedbackSubmit: (data: any) => void;
+    variant?: 'default' | 'compact';
 }
 
-export default function ProductCard({ product, sessionId, messageId, onFeedbackSubmit }: ProductCardProps) {
+export default function ProductCard({ product, sessionId, messageId, onFeedbackSubmit, variant = 'default' }: ProductCardProps) {
     const [showMenu, setShowMenu] = useState(false);
     const [showFeedback, setShowFeedback] = useState(false);
     const [showDescription, setShowDescription] = useState(false);
+    const isCompact = variant === 'compact';
 
     const handleFeedback = (data: any) => {
         onFeedbackSubmit({
@@ -47,7 +49,7 @@ export default function ProductCard({ product, sessionId, messageId, onFeedbackS
                         className={`object-cover w-full h-full transition-transform duration-500 group-hover:scale-110`}
                     />
 
-                    <div className="absolute top-2 right-2 z-10 flex gap-1">
+                    <div className={`absolute top-2 right-2 z-10 flex gap-1 ${isCompact ? 'scale-90 origin-top-right' : ''}`}>
                         <button
                             onClick={() => setShowDescription(true)}
                             className={`p-1.5 rounded-full backdrop-blur-md transition-colors bg-black/50 text-white hover:bg-black/70`}
@@ -80,18 +82,18 @@ export default function ProductCard({ product, sessionId, messageId, onFeedbackS
                     </div>
                 </div>
 
-                <div className="p-4 flex flex-col flex-grow">
+                <div className={`${isCompact ? 'p-3' : 'p-4'} flex flex-col flex-grow`}>
                     <div className="flex justify-between items-start gap-2 mb-2">
-                        <h3 className="font-medium text-white line-clamp-2 text-sm leading-tight">
+                        <h3 className={`font-medium text-white line-clamp-2 leading-tight ${isCompact ? 'text-xs' : 'text-sm'}`}>
                             {product.title}
                         </h3>
-                        <span className="font-bold text-purple-400 whitespace-nowrap">
+                        <span className={`font-bold text-purple-400 whitespace-nowrap ${isCompact ? 'text-xs' : 'text-sm'}`}>
                             ₹{product.price_numeric}
                         </span>
                     </div>
 
                     {product.brand && (
-                        <p className="text-xs text-gray-500 mb-3">{product.brand}</p>
+                        <p className={`text-gray-500 mb-3 ${isCompact ? 'text-[10px]' : 'text-xs'}`}>{product.brand}</p>
                     )}
 
                     <div className="mt-auto pt-3">
@@ -99,9 +101,9 @@ export default function ProductCard({ product, sessionId, messageId, onFeedbackS
                             href={product.product_url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="flex items-center justify-center gap-2 w-full py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-xs font-medium text-gray-300 transition-colors"
+                            className={`flex items-center justify-center gap-2 w-full ${isCompact ? 'py-1.5' : 'py-2'} bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg ${isCompact ? 'text-[10px]' : 'text-xs'} font-medium text-gray-300 transition-colors`}
                         >
-                            View Product <ExternalLink size={12} />
+                            View Product <ExternalLink size={isCompact ? 10 : 12} />
                         </a>
                     </div>
                 </div>

@@ -75,7 +75,7 @@ export async function POST(req: Request) {
 
             try {
                 const body = await req.json();
-                const { message, sessionId: providedSessionId, isReload, guestId } = body;
+                const { message, sessionId: providedSessionId, isReload, guestId, reloadCount = 0, excludeIds = [], seenBrands = [] } = body;
 
                 let sessionId = providedSessionId;
                 let isNewSession = false;
@@ -127,11 +127,11 @@ export async function POST(req: Request) {
                             - Identify if critical info is missing: Who is it for? What is the occasion? What are their hobbies/interests? What is the budget?
                             
                             Return a JSON object with:
-                            - search_query: A refined query for vector search.
+                            - search_query: A refined query for vector search. EXPAND this with synonyms to improve recall (e.g. "bottom wear" -> "bottom wear pants trousers skirts shorts").
                             - target_collection: "girlfriends", "boyfriends", "products". Default "products".
                             - preferences: { price_min, price_max, ... }.
-                            - missing_info: [] (List of missing critical info fields, e.g., ["recipient", "budget", "occasion", "interests"]).
-                            - needs_clarification: boolean (True if the user's request is too vague to give good recommendations, e.g., just "gift" or "help").
+                            - missing_info: [] (List of missing critical info fields).
+                            - needs_clarification: boolean.
                             `
                         },
                         {
@@ -155,21 +155,88 @@ export async function POST(req: Request) {
                     filter.must = [{ key: "price_numeric", range: { gte: price_min || 0, lte: price_max || 1000000 } }];
                 }
 
-                // Step 5a: Targeted Search
-                // 5a. Check if we should ask for clarification instead of searching
-                // Only skip search if it's the VERY first message and it's extremely vague (e.g. "hi"), 
-                // OR if needs_clarification is true AND we have no history. 
-                // But usually we want to show *something*. 
-                // Let's proceed with search but the system prompt will handle the "asking" part if results are generic.
+                // Exclude seen products
+                if (excludeIds.length > 0) {
+                    filter.must_not = [{ has_id: excludeIds }];
+                }
 
-                // 5b. Vector Search with Fallback
+                // Step 5a: Targeted Search
                 sendStatus(`Searching in ${targetCollection}...`);
-                const searchOffset = isReload ? 6 : 0; // Offset for reload to get different results
+                const searchOffset = 0; // No offset, we use exclusion
+
+                // Helper for Aggressive Diversity (Brand Cycling + Round-Robin)
+                const getDiverseProducts = (items: any[], limit: number) => {
+                    if (items.length === 0) return [];
+
+                    // 1. Separate into New Brands and Old Brands
+                    const newBrandItems: any[] = [];
+                    const oldBrandItems: any[] = [];
+                    const seenBrandsSet = new Set(seenBrands);
+
+                    items.forEach(item => {
+                        const product = { id: item.id, ...item.payload };
+                        const brand = (product as any).brand || 'Unknown';
+
+                        if (!seenBrandsSet.has(brand)) {
+                            newBrandItems.push(product);
+                        } else {
+                            oldBrandItems.push(product);
+                        }
+                    });
+
+                    // 2. Helper to Interleave items by unique brand
+                    const interleaveByBrand = (list: any[]) => {
+                        const brandMap = new Map<string, any[]>();
+                        list.forEach(p => {
+                            const b = (p as any).brand || 'Unknown';
+                            if (!brandMap.has(b)) brandMap.set(b, []);
+                            brandMap.get(b)?.push(p);
+                        });
+
+                        const interleaved: any[] = [];
+                        const brands = Array.from(brandMap.values());
+                        let maxLen = 0;
+                        brands.forEach(b => maxLen = Math.max(maxLen, b.length));
+
+                        for (let i = 0; i < maxLen; i++) {
+                            for (const brandProducts of brands) {
+                                if (i < brandProducts.length) {
+                                    interleaved.push(brandProducts[i]);
+                                }
+                            }
+                        }
+                        return interleaved;
+                    };
+
+                    // 3. Interleave both lists separately
+                    const sortedNew = interleaveByBrand(newBrandItems);
+                    const sortedOld = interleaveByBrand(oldBrandItems);
+
+                    // 4. Combine: Prioritize New Brands
+                    // We want to fill the limit with as many new brands as possible
+                    let finalPool = [...sortedNew, ...sortedOld];
+
+                    // 5. Random Sampling from Top K (to ensure variety across sessions for same query)
+                    // We take the top 2 * limit items from the prioritized list and shuffle them
+                    // BUT we must respect the "New Brand" priority. 
+                    // So we only shuffle if we have enough candidates.
+                    // Strategy: Take top K, then shuffle.
+                    const poolSize = Math.min(finalPool.length, limit * 2);
+                    const topPool = finalPool.slice(0, poolSize);
+
+                    // Fisher-Yates Shuffle
+                    for (let i = topPool.length - 1; i > 0; i--) {
+                        const j = Math.floor(Math.random() * (i + 1));
+                        [topPool[i], topPool[j]] = [topPool[j], topPool[i]];
+                    }
+
+                    return topPool.slice(0, limit);
+                };
 
                 let searchResult = await qdrantClient.search(targetCollection, {
                     vector: embedding,
                     filter: Object.keys(filter).length > 0 ? filter : undefined,
-                    limit: 6,
+                    limit: 60, // Fetch large pool for diversity
                     offset: searchOffset,
                     with_payload: true,
                 });
@@ -180,28 +247,28 @@ export async function POST(req: Request) {
                     searchResult = await qdrantClient.search('products', {
                         vector: embedding,
                         filter: Object.keys(filter).length > 0 ? filter : undefined,
-                        limit: 6,
+                        limit: 60,
                         offset: searchOffset,
                         with_payload: true,
                     });
                 }
 
-                // Process Results
-                const uniqueBrands = new Set();
-                const diverseProducts: any[] = [];
-                const otherProducts: any[] = [];
-
-                for (const item of searchResult) {
-                    const product = { id: item.id, ...item.payload };
-                    const brand = (product as any).brand || 'Unknown';
-                    if (!uniqueBrands.has(brand)) {
-                        uniqueBrands.add(brand);
-                        diverseProducts.push(product);
-                    } else {
-                        otherProducts.push(product);
-                    }
+                // Search Toastd Collection
+                sendStatus("Checking Toastd catalog...");
+                let toastdResult: any[] = [];
+                try {
+                    toastdResult = await qdrantClient.search('toastd', {
+                        vector: embedding,
+                        filter: Object.keys(filter).length > 0 ? filter : undefined,
+                        limit: 40, // Fetch large pool
+                        with_payload: true,
+                    });
+                } catch (e) {
+                    console.warn("Toastd search failed:", e);
                 }
-                products = [...diverseProducts, ...otherProducts].slice(0, 6);
+
+                const toastdProducts = getDiverseProducts(toastdResult, 10);
+                products = getDiverseProducts(searchResult, 10);
 
                 if (products.length === 0) {
                     sendStatus("No matching products found.");
@@ -209,7 +276,6 @@ export async function POST(req: Request) {
                     sendStatus(`Found ${products.length} relevant products.`);
                 }
 
-                // 6. Response Generation
                 // 6. Response Generation
                 sendStatus("Curating recommendations...");
                 const systemPrompt = products.length > 0
@@ -248,9 +314,10 @@ export async function POST(req: Request) {
                 const assistantResponse = responseCompletion.choices[0].message.content || "I'm sorry, I couldn't find any recommendations right now.";
 
                 // 7. Store Assistant Message & Update Redis
+                const allProductsToStore = [...products, ...toastdProducts];
                 await pool.query(
                     'UPDATE messages SET assistant_content = $1, product = $2 WHERE id = $3',
-                    [assistantResponse, products.map(p => JSON.stringify(p)), messageId]
+                    [assistantResponse, allProductsToStore.map(p => JSON.stringify(p)), messageId]
                 );
                 await updateSessionContext(sessionId, message, assistantResponse);
 
@@ -262,6 +329,7 @@ export async function POST(req: Request) {
                         messageId,
                         assistantResponse,
                         products,
+                        toastdProducts,
                         preferences: intentData.preferences || {}
                     }
                 }) + '\n'));
@@ -307,14 +375,17 @@ export async function GET(req: Request) {
                 role: 'user',
                 content: row.user_content
             });
-            if (row.assistant_content) {
-                messages.push({
-                    id: row.id + '_assistant',
-                    role: 'assistant',
-                    content: row.assistant_content,
-                    products: row.product ? row.product.map((p: string) => JSON.parse(p)) : undefined
-                });
-            }
+            const allProducts = row.product ? row.product.map((p: string) => JSON.parse(p)) : [];
+            const mainProducts = allProducts.filter((p: any) => p.source !== 'toastd');
+            const toastdProducts = allProducts.filter((p: any) => p.source === 'toastd');
+
+            messages.push({
+                id: row.id + '_assistant',
+                role: 'assistant',
+                content: row.assistant_content,
+                products: mainProducts,
+                toastdProducts: toastdProducts
+            });
         });
 
         return NextResponse.json({ messages });
