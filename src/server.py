@@ -10,7 +10,7 @@ import os
 from search import SemanticSearchSystem
 
 # config
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyCss7mONolh071ibtAkyqK7sI-MjgMJgdw")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "your gemini api key")
 PRODUCT_DATA_PATH = "product_data.pkl"
 
 # setup fastapi
