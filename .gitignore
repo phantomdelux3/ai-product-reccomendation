@@ -125,3 +125,15 @@ temp/
 # Celery
 celerybeat-schedule
 celerybeat.pid
+
+# Qdrant snapshots
+*.snapshot
+
+# Server logs
+/tmp/
+
+# Local test files
+test_*.py
+
+#Ignore vscode AI rules
+.github/instructions/codacy.instructions.md

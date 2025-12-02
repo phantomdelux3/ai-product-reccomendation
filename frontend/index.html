@@ -319,7 +319,7 @@
     </div>
 
     <script>
-        const API_URL = 'http://localhost:8000';
+        const API_URL = 'http://localhost:8001';
 
         // search function
         async function search() {
@@ -339,11 +339,15 @@
             container.innerHTML = `
                 <div class="loading">
                     <div class="loading-spinner"></div>
-                    <p>finding the best products for you...</p>
+                    <p>finding the best products for you... (this may take 10-15 seconds)</p>
                 </div>
             `;
 
             try {
+                // Create AbortController for timeout
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+
                 const response = await fetch(`${API_URL}/search`, {
                     method: 'POST',
                     headers: {
@@ -351,9 +355,12 @@
                     },
                     body: JSON.stringify({
                         query: query,
-                        top_k: 15
-                    })
+                        limit: 15
+                    }),
+                    signal: controller.signal
                 });
+
+                clearTimeout(timeoutId);
 
                 if (!response.ok) {
                     throw new Error('search failed');
@@ -363,9 +370,18 @@
                 displayResults(data);
 
             } catch (error) {
+                console.error('Search error:', error);
+                let errorMsg = 'something went wrong!';
+                if (error.name === 'AbortError') {
+                    errorMsg = 'Request timed out. The server is taking too long to respond.';
+                } else if (!navigator.onLine) {
+                    errorMsg = 'No internet connection.';
+                } else {
+                    errorMsg = `Connection error. Make sure the server is running on ${API_URL}`;
+                }
                 container.innerHTML = `
                     <div class="error">
-                        something went wrong! make sure the server is running on ${API_URL}
+                        ${errorMsg}
                     </div>
                 `;
             } finally {
@@ -390,39 +406,38 @@
 
             const header = `
                 <div class="results-header">
-                    found ${data.total_results} products for "${data.query}" 
-                    (took ${data.processing_time_ms}ms)
+                    found ${data.totalResults} products for "${data.query}" 
+                    (took ${data.processingTimeMs.toFixed(0)}ms)
                 </div>
             `;
 
             const products = data.results.map(item => {
-                const product = item.product;
-                const imageUrl = product.image || 'https://via.placeholder.com/300x300?text=No+Image';
-                const price = product.price ? `₹${product.price.toFixed(0)}` : 'N/A';
-                const productUrl = product.url || '';
+                const imageUrl = item.imageUrl || 'https://via.placeholder.com/300x300?text=No+Image';
+                const price = item.price ? `₹${item.price.toFixed(0)}` : 'N/A';
+                const productUrl = item.productUrl || '';
+                // Use relevanceScore (LLM score) as primary, fallback to score
+                const score = item.relevanceScore || item.score || 0;
                 
                 return `
                     <div class="product-card" onclick="openProduct('${productUrl}')">
-                        <img src="${imageUrl}" alt="${product.name}" class="product-image" onerror="this.src='https://via.placeholder.com/300x300?text=Image+Not+Found'">
+                        <img src="${imageUrl}" alt="${item.title}" class="product-image" onerror="this.src='https://via.placeholder.com/300x300?text=Image+Not+Found'">
                         <div class="product-info">
-                            <div class="product-name">${product.name}</div>
-                            <div class="product-description">${product.description || product.headline || 'no description available'}</div>
-                            <div class="product-score">match: ${(item.relevance_score * 100).toFixed(0)}%</div>
-                            <div class="product-reasoning">${item.reasoning}</div>
+                            <div class="product-name">${item.title}</div>
+                            <div class="product-description">${item.description || item.headline || 'no description available'}</div>
+                            <div class="product-score">match: ${(score * 100).toFixed(0)}%</div>
+                            <div class="product-reasoning">${item.reasoning || ''}</div>
                             <div class="product-footer">
                                 <div class="product-price">${price}</div>
                                 <div class="product-meta">
-                                    <span>${product.views} views</span>
+                                    <span>${item.views || 0} views</span>
                                     <span>•</span>
-                                    <span>${product.votes} votes</span>
+                                    <span>${item.votes || 0} votes</span>
                                 </div>
                             </div>
                         </div>
                     </div>
                 `;
-            }).join('');
-
-            container.innerHTML = header + '<div class="results-grid">' + products + '</div>';
+            }).join('');            container.innerHTML = header + '<div class="results-grid">' + products + '</div>';
         }
 
         // open product in new tab

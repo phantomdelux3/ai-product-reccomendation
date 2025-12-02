@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  # Search API
+  api:
+    build:
+      context: ./integration
+      dockerfile: Dockerfile
+    container_name: toastd-api
+    ports:
+      - "8001:8001"
+    environment:
+      - USE_OLLAMA=true
+      - OLLAMA_URL=http://host.docker.internal:11434
+      - OLLAMA_MODEL=llama3.2
+      - QDRANT_URL=http://host.docker.internal:6333
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: toastd-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    restart: unless-stopped
