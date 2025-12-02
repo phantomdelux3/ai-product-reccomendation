@@ -40,7 +40,19 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# Python
 venv/
 /venv
+*.pyc
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+scripts/venv/
+scripts/__pycache__/
+
+# Project specific
 upsert/
 /upsert
+logs/
+
