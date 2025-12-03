@@ -28,23 +28,31 @@ export async function POST(req: Request) {
             );
         }
 
-        // Forward request to Python FastAPI server
-        const response = await fetch(`${TOASTD_API_URL}/search`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query, limit, priceMin, priceMax }),
-        });
+        // Forward request to Python FastAPI server with timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
-        if (!response.ok) {
-            const error = await response.json().catch(() => ({ detail: 'Search failed' }));
-            return NextResponse.json(
-                { error: error.detail || 'Search failed' },
-                { status: response.status }
-            );
+        try {
+            const response = await fetch(`${TOASTD_API_URL}/search`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query, limit, priceMin, priceMax }),
+                signal: controller.signal,
+            });
+
+            if (!response.ok) {
+                const error = await response.json().catch(() => ({ detail: 'Search failed' }));
+                return NextResponse.json(
+                    { error: error.detail || 'Search failed' },
+                    { status: response.status }
+                );
+            }
+
+            const data = await response.json();
+            return NextResponse.json(data);
+        } finally {
+            clearTimeout(timeoutId);
         }
-
-        const data = await response.json();
-        return NextResponse.json(data);
 
     } catch (error: unknown) {
         console.error('Toastd search error:', error);
@@ -54,9 +62,14 @@ export async function POST(req: Request) {
 }
 
 export async function GET() {
-    // Health check endpoint
+    // Health check endpoint with timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
     try {
-        const response = await fetch(`${TOASTD_API_URL}/health`);
+        const response = await fetch(`${TOASTD_API_URL}/health`, {
+            signal: controller.signal,
+        });
         
         if (!response.ok) {
             return NextResponse.json(
@@ -74,5 +87,7 @@ export async function GET() {
             { status: 'unhealthy', error: message },
             { status: 503 }
         );
+    } finally {
+        clearTimeout(timeoutId);
     }
 }

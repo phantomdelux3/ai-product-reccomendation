@@ -25,6 +25,8 @@ import hashlib
 from collections import OrderedDict
 from dotenv import load_dotenv
 import requests
+import re
+import random
 
 from qdrant_client import QdrantClient
 from sentence_transformers import SentenceTransformer
@@ -62,6 +64,12 @@ USE_LLM = LLM_PROVIDER != "none"
 # Cache Configuration
 CACHE_SIZE = 500  # Number of queries to cache
 CACHE_TTL = 3600  # Cache TTL in seconds (1 hour)
+
+# Product types for filtering (used in reranking and fallback)
+PRODUCT_TYPE_LIST = [
+    'hoodie', 'hoodies', 't-shirt', 'tshirt', 'tee', 'shirt', 'dress', 'pants', 'jeans',
+    'jacket', 'bag', 'backpack', 'shoes', 'sneakers', 'watch', 'skincare', 'makeup', 'cream'
+]
 
 app = FastAPI(
     title="Toastd Advanced Search API",
@@ -161,6 +169,7 @@ class SearchRequest(BaseModel):
     priceMin: Optional[float] = Field(None, ge=0)
     priceMax: Optional[float] = Field(None, ge=0)
     skipCache: bool = Field(False, description="Skip cache for fresh results")
+    skipRerank: bool = Field(False, description="Skip LLM reranking for faster results")
 
 
 class ProductResult(BaseModel):
@@ -203,6 +212,7 @@ def check_ollama_available() -> bool:
             model_names = [m.get("name", "").split(":")[0] for m in models]
             return OLLAMA_MODEL.split(":")[0] in model_names
     except Exception:
+        # Silently fail - Ollama not available is a valid state, will fall back to OpenAI or simple search
         pass
     return False
 
@@ -357,7 +367,6 @@ Return ONLY valid JSON, no other text."""
             text = text[start:end]
         
         # Fix common JSON issues
-        import re
         # Fix trailing commas
         text = re.sub(r',\s*}', '}', text)
         text = re.sub(r',\s*]', ']', text)
@@ -396,26 +405,33 @@ def rerank_with_llm(user_query: str, expanded_context: Dict, candidates: List[Di
     Use LLM to rerank - matches algorithm from src/search.py.
     Uses detailed product data including popularity signals.
     Only returns products that genuinely match the query.
+    
+    Handles both toastd-final schema (name, short_description) and
+    products schema (title, description).
     """
     # Prepare product data for LLM - consider top 15 candidates
     products_for_llm = []
     for i, c in enumerate(candidates[:15]):
         p = c['product']
+        # Handle both schemas
+        name = (p.get('title') or p.get('name', ''))[:80]
+        desc = (p.get('description') or p.get('short_description', '') or '')[:100]
+        tags = (p.get('tags', '') or '')
+        if isinstance(tags, list):
+            tags = ', '.join(tags[:5])
+        tags = tags[:50]
+        
         products_for_llm.append({
             'i': i,
-            'name': p.get('name', '')[:80],
-            'desc': (p.get('short_description', '') or '')[:100],
-            'tags': (p.get('tags', '') or '')[:50]
+            'name': name,
+            'desc': desc,
+            'tags': tags
         })
-    
-    intent = expanded_context.get('search_intent', user_query)
-    categories = expanded_context.get('product_categories', [])[:5]
     
     # Extract primary product type from query for strict filtering
     query_lower = user_query.lower()
     product_type = None
-    for ptype in ['hoodie', 'hoodies', 't-shirt', 'tshirt', 'tee', 'shirt', 'dress', 'pants', 'jeans', 
-                  'jacket', 'bag', 'backpack', 'shoes', 'sneakers', 'watch', 'skincare', 'makeup']:
+    for ptype in PRODUCT_TYPE_LIST:
         if ptype in query_lower:
             product_type = ptype
             break
@@ -452,7 +468,6 @@ JSON only:"""
             text = text[start:end]
         
         # Fix common JSON issues
-        import re
         text = re.sub(r',\s*]', ']', text)
         text = re.sub(r',\s*}', '}', text)
         if not text.endswith(']'):
@@ -474,9 +489,14 @@ JSON only:"""
                 # Additional validation: if product type specified, verify it's in the product
                 if product_type:
                     p = candidates[idx]['product']
-                    name_lower = (p.get('name', '') or '').lower()
-                    tags_lower = (p.get('tags', '') or '').lower()
-                    desc_lower = (p.get('short_description', '') or '').lower()
+                    # Handle both schemas
+                    name_lower = (p.get('title', '') or p.get('name', '') or '').lower()
+                    tags = p.get('tags', '') or p.get('auto_tags', [])
+                    if isinstance(tags, list):
+                        tags_lower = ', '.join(tags).lower()
+                    else:
+                        tags_lower = str(tags).lower()
+                    desc_lower = (p.get('description', '') or p.get('short_description', '') or '').lower()
                     pt_check = product_type.rstrip('s')  # Remove plural
                     if pt_check not in name_lower and pt_check not in tags_lower and pt_check not in desc_lower:
                         continue  # Skip products that don't actually contain the type
@@ -503,21 +523,29 @@ JSON only:"""
 
 
 def _fallback_ranking(candidates: List[Dict], top_k: int, query: str = "") -> List[Dict]:
-    """Fallback when LLM fails - apply basic name-based filtering"""
+    """Fallback when LLM fails - apply basic name-based filtering.
+    
+    Handles both toastd-final schema (name, short_description) and
+    products schema (title, description).
+    """
     # Extract product type from query for basic filtering
     query_lower = query.lower()
     product_types = []
-    for ptype in ['hoodie', 'hoodies', 't-shirt', 'tshirt', 'tee', 'shirt', 'dress', 'pants', 'jeans', 
-                  'jacket', 'bag', 'backpack', 'shoes', 'sneakers', 'watch', 'skincare', 'makeup', 'cream']:
+    for ptype in PRODUCT_TYPE_LIST:
         if ptype in query_lower:
             product_types.append(ptype.rstrip('s'))  # Remove plural 's'
     
     results = []
     for i, candidate in enumerate(candidates):
         product = candidate['product']
-        name_lower = (product.get('name', '') or '').lower()
-        tags_lower = (product.get('tags', '') or '').lower()
-        desc_lower = (product.get('short_description', '') or '').lower()
+        # Handle both schemas
+        name_lower = (product.get('title', '') or product.get('name', '') or '').lower()
+        tags = product.get('tags', '') or product.get('auto_tags', [])
+        if isinstance(tags, list):
+            tags_lower = ', '.join(tags).lower()
+        else:
+            tags_lower = str(tags).lower()
+        desc_lower = (product.get('description', '') or product.get('short_description', '') or '').lower()
         
         # If we have product type requirements, check if this matches
         if product_types:
@@ -679,8 +707,6 @@ def _parse_price_from_query(query: str) -> tuple:
     - "bags between 500 and 2000" -> (500, 2000, "bags")
     - "gifts below rs 1500" -> (None, 1500, "gifts")
     """
-    import re
-    
     price_min = None
     price_max = None
     clean_query = query
@@ -727,20 +753,40 @@ def _parse_price_from_query(query: str) -> tuple:
 
 
 def _format_product_result(item: Dict) -> ProductResult:
-    """Format a single product result."""
+    """Format a single product result.
+    
+    Handles both toastd-final schema (name, short_description, main_image) and
+    products schema (title, description, image_url).
+    """
     p = item.get('product', {})
     
-    tags_val = p.get('tags', '')
-    tags_str = ', '.join(tags_val) if isinstance(tags_val, list) else tags_val
+    # Handle tags - could be string or list
+    tags_val = p.get('tags', '') or p.get('auto_tags', [])
+    if isinstance(tags_val, list):
+        tags_str = ', '.join(tags_val[:10])  # Limit to 10 tags
+    else:
+        tags_str = str(tags_val)
+    
+    # Handle title - products collection uses 'title', toastd-final uses 'name'
+    title = p.get('title') or p.get('name', '')
+    
+    # Handle description - products uses 'description', toastd-final uses 'short_description'
+    description = p.get('description') or p.get('short_description', '')
+    
+    # Handle image URL - products uses 'image_url', toastd-final uses 'main_image'
+    image_url = p.get('image_url') or p.get('main_image')
+    
+    # Handle price - products uses 'price_numeric', toastd-final uses 'price'
+    price = _safe_float(p.get('price_numeric')) or _safe_float(p.get('price'))
     
     return ProductResult(
         id=item.get('id', str(p.get('id', ''))),
-        title=p.get('name', ''),
-        description=p.get('short_description', ''),
+        title=title,
+        description=description,
         headline=p.get('headline_description'),
-        price=_safe_float(p.get('price')),
-        priceNumeric=_safe_float(p.get('price')),
-        imageUrl=p.get('main_image'),
+        price=price,
+        priceNumeric=price,
+        imageUrl=image_url,
         productUrl=p.get('product_url'),
         tags=tags_str,
         views=int(p.get('view_count', 0) or 0),
@@ -753,7 +799,10 @@ def _format_product_result(item: Dict) -> ProductResult:
 
 
 def _build_price_filter(price_min: Optional[float], price_max: Optional[float]) -> Optional[Dict]:
-    """Build price filter for Qdrant query."""
+    """Build price filter for Qdrant query.
+    
+    Uses 'price' field for toastd-final collection.
+    """
     if price_min is None and price_max is None:
         return None
     return {
@@ -807,7 +856,7 @@ def _perform_search(request: SearchRequest) -> Dict:
     ]
     
     # Rerank with LLM or use simple results
-    if USE_LLM and candidates:
+    if USE_LLM and candidates and not request.skipRerank:
         reranked = rerank_with_llm(search_query, expanded, candidates, top_k=request.limit)
         final_results = apply_final_scoring(reranked)
     else:
@@ -922,7 +971,12 @@ async def root():
 import uuid
 from datetime import datetime
 
-# In-memory session storage (use Redis/DB in production)
+# TODO: In-memory session storage - will be lost on server restart.
+# For production, implement persistence layer with one of:
+#   - Redis: Use redis-py with connection pooling for fast key-value storage
+#   - PostgreSQL: Use SQLAlchemy with async support for relational data
+#   - MongoDB: Use motor for document-based storage
+# Consider adding a STORAGE_BACKEND env var to toggle between implementations.
 sessions_store: Dict[str, Dict] = {}  # sessionId -> session data
 user_sessions: Dict[str, List[str]] = {}  # userId -> list of sessionIds
 messages_store: Dict[str, List[Dict]] = {}  # sessionId -> list of messages
@@ -1002,8 +1056,6 @@ def _generate_assistant_response(query: str, products: List[Dict]) -> str:
         f"Based on your search, I've found {count} items{price_info} that you might love:",
         f"Great news! I found {count} products{price_info} that fit your criteria:",
     ]
-    
-    import random
     return random.choice(responses)
 
 

@@ -51,25 +51,33 @@ export async function searchToastd(
 ): Promise<ToastdSearchResponse> {
     const { limit = 10, priceMin, priceMax } = options;
 
-    const response = await fetch(`${TOASTD_API_URL}/search`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            query,
-            limit,
-            priceMin,
-            priceMax,
-        }),
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
-    if (!response.ok) {
-        const error = await response.json().catch(() => ({ detail: 'Search failed' }));
-        throw new Error(error.detail || 'Toastd search failed');
+    try {
+        const response = await fetch(`${TOASTD_API_URL}/search`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                query,
+                limit,
+                priceMin,
+                priceMax,
+            }),
+            signal: controller.signal,
+        });
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({ detail: 'Search failed' }));
+            throw new Error(error.detail || 'Toastd search failed');
+        }
+
+        return response.json();
+    } finally {
+        clearTimeout(timeoutId);
     }
-
-    return response.json();
 }
 
 /**
@@ -81,13 +89,22 @@ export async function checkToastdHealth(): Promise<{
     productsCount: number;
     model: string;
 }> {
-    const response = await fetch(`${TOASTD_API_URL}/health`);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
-    if (!response.ok) {
-        throw new Error('Toastd API is not healthy');
+    try {
+        const response = await fetch(`${TOASTD_API_URL}/health`, {
+            signal: controller.signal,
+        });
+
+        if (!response.ok) {
+            throw new Error('Toastd API is not healthy');
+        }
+
+        return response.json();
+    } finally {
+        clearTimeout(timeoutId);
     }
-
-    return response.json();
 }
 
 export default {
