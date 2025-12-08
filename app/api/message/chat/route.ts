@@ -6,6 +6,7 @@ import redisClient from '@/lib/redis';
 import { getEmbedding } from '@/lib/embeddings';
 import toons from '@/lib/toons';
 import { v4 as uuidv4 } from 'uuid';
+import { searchToastd } from '@/lib/toastd-client';
 
 // Helper to get session context (Redis -> DB)
 async function getSessionContext(sessionId: string, messageId: string) {
@@ -253,21 +254,50 @@ export async function POST(req: Request) {
                     });
                 }
 
-                // Search Toastd Collection
+                // Search Toastd Collection via FastAPI
                 sendStatus("Checking Toastd catalog...");
-                let toastdResult: any[] = [];
+                let toastdProducts: any[] = [];
                 try {
-                    toastdResult = await qdrantClient.search('toastd', {
-                        vector: embedding,
-                        filter: Object.keys(filter).length > 0 ? filter : undefined,
-                        limit: 40, // Fetch large pool
-                        with_payload: true,
+                    // Use the FastAPI toastd search client for better semantic search
+                    const toastdResponse = await searchToastd(message, {
+                        limit: 10,
+                        priceMin: intentData.preferences?.priceMin,
+                        priceMax: intentData.preferences?.priceMax
                     });
+
+                    // Transform toastd results to match expected format
+                    toastdProducts = toastdResponse.results.map((item: any) => ({
+                        id: item.id,
+                        payload: {
+                            name: item.title,
+                            short_description: item.description,
+                            headline_description: item.headline,
+                            price: item.price,
+                            main_image: item.imageUrl,
+                            product_url: item.productUrl,
+                            tags: item.tags,
+                            view_count: item.views,
+                            vote_count: item.votes
+                        },
+                        score: item.score,
+                        source: 'toastd'
+                    }));
                 } catch (e) {
-                    console.warn("Toastd search failed:", e);
+                    console.warn("Toastd API search failed:", e);
+                    // Fallback to direct Qdrant search if API is unavailable
+                    try {
+                        const toastdResult = await qdrantClient.search('toastd', {
+                            vector: embedding,
+                            filter: Object.keys(filter).length > 0 ? filter : undefined,
+                            limit: 10,
+                            with_payload: true,
+                        });
+                        toastdProducts = getDiverseProducts(toastdResult, 10);
+                    } catch (fallbackError) {
+                        console.warn("Toastd fallback search also failed:", fallbackError);
+                    }
                 }
 
-                const toastdProducts = getDiverseProducts(toastdResult, 10);
                 products = getDiverseProducts(searchResult, 10);
 
                 if (products.length === 0) {
