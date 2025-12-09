@@ -1,0 +1,90 @@
+{
+  "boyfriends": [],
+  "girlfriends": [
+    {
+      "id": "Plushies",
+      "label": "Plushies",
+      "subOptions": [
+        "Shark",
+        "Husky",
+        "Rug",
+        "Cuddle Pillow",
+        "Dog Bed",
+        "Natural Orange Peel Water",
+        "Toffee Plushie",
+        "Pengy",
+        "Bucket Bag",
+        "Worry Stone",
+        "Collectibles",
+        "Crystal Elixir Water Bottle",
+        "Teddy Bear",
+        "Stuffed Animal"
+      ]
+    },
+    {
+      "id": "Skincare",
+      "label": "Skincare",
+      "subOptions": [
+        "Body Oil",
+        "Shampoo",
+        "Acne Treatment",
+        "Pimple Patches",
+        "Body Crème",
+        "Face Wash",
+        "Moisturizer",
+        "Luxury Skincare Set"
+      ]
+    },
+    {
+      "id": "Apparel",
+      "label": "Apparel",
+      "subOptions": [
+        "Backpack",
+        "Travel Wallet",
+        "Wallet",
+        "Handbag",
+        "T-Shirt",
+        "Blouse",
+        "Travel Case",
+        "Slippers",
+        "Crossbody Bag"
+      ]
+    },
+    {
+      "id": "Hair Care",
+      "label": "Hair Care",
+      "subOptions": [
+        "Shampoo and Conditioner",
+        "Shampoo",
+        "Castor Oil for Hair Growth",
+        "Oil",
+        "Cleanser",
+        "Kit",
+        "Rice Water Spray"
+      ]
+    },
+    {
+      "id": "Miscellaneous",
+      "label": "Miscellaneous",
+      "subOptions": [
+        "Collectible Items"
+      ]
+    },
+    {
+      "id": "Home Decor",
+      "label": "Home Decor",
+      "subOptions": [
+        "Rug",
+        "Lamp",
+        "Plaque",
+        "Sofa",
+        "Canvas",
+        "Led Light Sign"
+      ]
+    }
+  ],
+  "mom": [],
+  "dad": [],
+  "friend": [],
+  "colouge": []
+}

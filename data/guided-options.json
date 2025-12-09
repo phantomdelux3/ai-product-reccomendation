@@ -1,0 +1,94 @@
+{
+    "options": [
+        {
+            "id": "boyfriend",
+            "label": "Boyfriend",
+            "subOptions": [
+                {
+                    "id": "gym",
+                    "label": "Gym"
+                },
+                {
+                    "id": "gamer",
+                    "label": "Gamer"
+                },
+                {
+                    "id": "aesthetics",
+                    "label": "Aesthetics (Clothes, Watch, Shoes)"
+                },
+                {
+                    "id": "luxury",
+                    "label": "Luxury"
+                },
+                {
+                    "id": "biker",
+                    "label": "Biker"
+                }
+            ]
+        },
+        {
+            "id": "girlfriend",
+            "label": "Girlfriend",
+            "subOptions": [
+                {
+                    "id": "rugs",
+                    "label": "Rugs"
+                },
+                {
+                    "id": "homedecor",
+                    "label": "Home Decor"
+                },
+                {
+                    "id": "apparel",
+                    "label": "Apparel"
+                },
+                {
+                    "id": "lamps",
+                    "label": "Lamps"
+                },
+                {
+                    "id": "perfumes",
+                    "label": "Perfumes"
+                },
+                {
+                    "id": "skincare",
+                    "label": "Skincare"
+                },
+                {
+                    "id": "tech_accessories",
+                    "label": "Tech Accessories"
+                },
+                {
+                    "id": "jewellery",
+                    "label": "Jewellery"
+                },
+                {
+                    "id": "bags",
+                    "label": "Bags"
+                }
+            ]
+        }
+    ],
+    "budgets": [
+        {
+            "id": "under_500",
+            "label": "Under ₹500"
+        },
+        {
+            "id": "500_1000",
+            "label": "₹500 - ₹1000"
+        },
+        {
+            "id": "1000_2000",
+            "label": "₹1000 - ₹2000"
+        },
+        {
+            "id": "2000_5000",
+            "label": "₹2000 - ₹5000"
+        },
+        {
+            "id": "above_5000",
+            "label": "Above ₹5000"
+        }
+    ]
+}

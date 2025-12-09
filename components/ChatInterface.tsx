@@ -1,11 +1,12 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Send, Sparkles, Menu, X, MessageSquare, Plus, RefreshCw } from 'lucide-react';
+import { Send, Sparkles, Menu, X, MessageSquare, Plus, RefreshCw, Zap, Compass } from 'lucide-react';
 import MessageBubble from './MessageBubble';
 import GradientBackground from './GradientBackground';
 import NewChatCard from './NewChatCard';
 import EmptyChatState from './EmptyChatState';
+import GuidedSearchInterface from './GuidedSearchInterface';
 import { v4 as uuidv4 } from 'uuid';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
@@ -24,7 +25,13 @@ interface Session {
     created_at: string;
 }
 
-export default function ChatInterface() {
+interface ChatInterfaceProps {
+    onSwitchMode?: () => void;
+    initialPayload?: string | null;
+    onClearPayload?: () => void;
+}
+
+export default function ChatInterface({ onSwitchMode, initialPayload, onClearPayload }: ChatInterfaceProps) {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -35,6 +42,10 @@ export default function ChatInterface() {
     const [seenBrands, setSeenBrands] = useState<Set<string>>(new Set());
     const [sessions, setSessions] = useState<Session[]>([]);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
+    // Mode State: 'chat' (Prompt) or 'guided'
+    const [inputMode, setInputMode] = useState<'chat' | 'guided'>('chat');
+
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
@@ -48,6 +59,17 @@ export default function ChatInterface() {
             scrollToBottom();
         }
     }, [messages]);
+
+    const processedPayloadRef = useRef<string | null>(null);
+
+    // Handle Initial Payload (Guided Mode)
+    useEffect(() => {
+        if (initialPayload && !isLoading && processedPayloadRef.current !== initialPayload) {
+            processedPayloadRef.current = initialPayload;
+            handleSendMessage({ isGuided: true, payload: initialPayload });
+            if (onClearPayload) onClearPayload();
+        }
+    }, [initialPayload]);
 
     // GSAP Typing Animation for Placeholder
     useGSAP(() => {
@@ -102,7 +124,7 @@ export default function ChatInterface() {
 
         typeText();
 
-    }, { scope: containerRef });
+    }, { scope: containerRef, dependencies: [inputMode] });
 
     // Initialize Guest ID and fetch sessions
     useEffect(() => {
@@ -135,6 +157,7 @@ export default function ChatInterface() {
             if (data.messages) {
                 setMessages(data.messages);
                 setSessionId(sId);
+                setInputMode('chat'); // Reset to chat mode when loading session
                 setIsSidebarOpen(false); // Close sidebar after selection
             }
         } catch (error) {
@@ -150,13 +173,15 @@ export default function ChatInterface() {
         setReloadCount(0);
         setSeenProductIds(new Set());
         setSeenBrands(new Set());
+        setInputMode('chat'); // Default to chat
         setIsSidebarOpen(false);
     };
 
     const [thinkingStatus, setThinkingStatus] = useState<string>('');
 
-    const handleSendMessage = async (isReload = false) => {
-        let messageToSend = input.trim();
+    const handleSendMessage = async (options: { isReload?: boolean, isGuided?: boolean, payload?: string } = {}) => {
+        const { isReload = false, isGuided = false, payload } = options;
+        let messageToSend = isGuided ? payload : input.trim();
 
         if (isReload) {
             const lastUserMessage = [...messages].reverse().find(msg => msg.role === 'user');
@@ -171,6 +196,11 @@ export default function ChatInterface() {
         setIsLoading(true);
         setThinkingStatus("Thinking...");
 
+        // If coming from guided mode, switch back to chat view to show results
+        if (isGuided) {
+            setInputMode('chat');
+        }
+
         if (!isReload) {
             setReloadCount(0); // Reset on new message
             setSeenProductIds(new Set()); // Reset seen products
@@ -178,7 +208,7 @@ export default function ChatInterface() {
             const tempUserMessage: Message = {
                 id: Date.now().toString(),
                 role: 'user',
-                content: messageToSend
+                content: messageToSend || ''
             };
             setMessages(prev => [...prev, tempUserMessage]);
             setInput('');
@@ -195,6 +225,7 @@ export default function ChatInterface() {
                     sessionId: sessionId || undefined,
                     guestId,
                     isReload,
+                    is_guided: isGuided, // Send flag to backend
                     reloadCount: isReload ? reloadCount + 1 : 0,
                     excludeIds: Array.from(seenProductIds),
                     seenBrands: Array.from(seenBrands)
@@ -302,6 +333,25 @@ export default function ChatInterface() {
         }
     };
 
+    // Helper to format user message (handle JSON from guided mode)
+    const formatUserMessage = (content: string) => {
+        try {
+            if (content.trim().startsWith('{')) {
+                const data = JSON.parse(content);
+                if (data.is_guided) {
+                    return `Looking for gifts for **${data.recipient}**. \n\nCategories: ${data.productTypes?.join(', ') || 'Any'}. \nAesthetic: ${data.aesthetics?.join(', ') || 'Any'}. \nBudget: ${data.budget || 'Any'}.`;
+                }
+            }
+        } catch (e) {
+            // Not JSON, return original
+        }
+        return content;
+    };
+
+    const handleGuidedSubmit = (payload: any) => {
+        handleSendMessage({ isGuided: true, payload: JSON.stringify(payload) });
+    };
+
     return (
         <div ref={containerRef} className="flex h-full w-full glass-card rounded-xl overflow-hidden shadow-2xl border-0 md:border border-white/10 relative bg-black">
             {/* Dynamic Shader Gradient Background */}
@@ -327,7 +377,7 @@ export default function ChatInterface() {
                             onClick={() => loadSession(session.id)}
                             className={`w-full text-left px-4 py-3 rounded-xl text-sm transition-all duration-200 flex items-center gap-3 group ${sessionId === session.id ? 'bg-white/10 text-white shadow-inner' : 'text-gray-400 hover:bg-white/5 hover:text-gray-200'}`}
                         >
-                            <MessageSquare size={16} className={`transition-colors ${sessionId === session.id ? 'text-pink-500' : 'text-gray-500 group-hover:text-gray-300'}`} />
+                            <MessageSquare size={16} className={`transition-colors ${sessionId === session.id ? 'text-yellow-500' : 'text-gray-500 group-hover:text-gray-300'}`} />
                             <span className="truncate font-medium">{session.session_name || 'New Conversation'}</span>
                         </button>
                     ))}
@@ -345,96 +395,128 @@ export default function ChatInterface() {
             {/* Main Chat Area */}
             <div className="flex-1 flex flex-col h-full relative w-full overflow-hidden">
                 {/* Header */}
-                <div className="flex-none p-4 md:p-6 border-b border-white/10 bg-black/20 backdrop-blur-md flex items-center gap-4 z-10">
-                    <button onClick={() => setIsSidebarOpen(true)} className="text-white p-2 hover:bg-white/10 rounded-lg transition-colors">
-                        <Menu size={24} />
-                    </button>
-                    <div className="w-10 h-10 md:w-12 md:h-12 rounded-xl bg-white/5 flex items-center justify-center shadow-lg ring-1 ring-white/10 overflow-hidden">
-                        <img src="/logo.png" alt="Logo" className="w-full h-full object-cover" />
-                    </div>
-                    <div>
-                        <h1 className="text-lg md:text-xl font-bold text-white tracking-tight">AI Gift Concierge</h1>
-                        <p className="text-xs text-purple-300 font-medium">Powered by Toastd</p>
+                <div className="flex-none p-4 md:p-6 border-b border-white/10 bg-black/20 backdrop-blur-md flex items-center justify-between z-10">
+                    <div className="flex items-center gap-4">
+                        <button onClick={() => setIsSidebarOpen(true)} className="text-white p-2 hover:bg-white/10 rounded-lg transition-colors">
+                            <Menu size={24} />
+                        </button>
+                        <div className="w-10 h-10 md:w-12 md:h-12 rounded-xl bg-white/5 flex items-center justify-center shadow-lg ring-1 ring-white/10 overflow-hidden">
+                            <img src="/logo.png" alt="Logo" className="w-full h-full object-cover" />
+                        </div>
+                        <div>
+                            <h1 className="text-lg md:text-xl font-bold text-white tracking-tight">AI Gift Concierge</h1>
+                            <p className="text-xs text-yellow-200 font-medium">Powered by Toastd</p>
+                        </div>
                     </div>
                 </div>
 
                 {/* Messages Area */}
                 <div className="flex-1 overflow-y-auto overflow-x-hidden scroll-smooth [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
-                    <div className="mx-auto w-full max-w-3xl p-4 md:p-6 space-y-6">
+                    <div className="mx-auto w-full max-w-3xl p-4 md:p-6 space-y-6 h-full flex flex-col">
 
-
-                        {messages.length === 0 && (
-                            <div className="flex-1 flex items-center justify-center h-full min-h-[60vh]">
+                        {messages.length === 0 ? (
+                            <div className="flex-1 flex flex-col items-center justify-center h-full min-h-[50vh]">
                                 <EmptyChatState />
-                            </div>
-                        )}
 
-                        {messages.map((msg) => (
-                            <MessageBubble
-                                key={msg.id}
-                                message={msg}
-                                sessionId={sessionId}
-                                onFeedbackSubmit={handleFeedbackSubmit}
-                            />
-                        ))}
-
-                        {thinkingStatus && (
-                            <div className="flex gap-4 mb-8 px-2 items-center animate-fade-in">
-                                <div className="w-8 h-8 rounded-full bg-gradient-to-r from-purple-600 to-pink-600 flex items-center justify-center shadow-lg shadow-purple-500/20">
-                                    <Sparkles size={16} className="text-white animate-spin-slow" />
+                                {/* Mode Switcher */}
+                                <div className="mt-8 flex items-center gap-2 p-1 bg-white/5 rounded-full border border-white/10 backdrop-blur-md">
+                                    <button
+                                        onClick={() => setInputMode('chat')}
+                                        className={`px-6 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-2 ${inputMode === 'chat'
+                                            ? 'bg-yellow-600 text-white shadow-lg'
+                                            : 'text-gray-400 hover:text-white'}`}
+                                    >
+                                        <Zap size={16} /> Prompt
+                                    </button>
+                                    <button
+                                        onClick={() => setInputMode('guided')}
+                                        className={`px-6 py-2 rounded-full text-sm font-medium transition-all flex items-center gap-2 ${inputMode === 'guided'
+                                            ? 'bg-orange-600 text-white shadow-lg'
+                                            : 'text-gray-400 hover:text-white'}`}
+                                    >
+                                        <Compass size={16} /> Guided
+                                    </button>
                                 </div>
-                                <div className="glass px-6 py-3 rounded-2xl rounded-tl-none border border-white/10 bg-white/5 backdrop-blur-md flex items-center gap-3">
-                                    <div className="flex gap-1">
-                                        <span className="w-1.5 h-1.5 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '0s' }}></span>
-                                        <span className="w-1.5 h-1.5 bg-pink-400 rounded-full animate-bounce" style={{ animationDelay: '0.15s' }}></span>
-                                        <span className="w-1.5 h-1.5 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }}></span>
+
+                                {/* Guided Interface Container */}
+                                {inputMode === 'guided' && (
+                                    <div className="w-full mt-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                                        <GuidedSearchInterface onGuidedSubmit={handleGuidedSubmit} />
                                     </div>
-                                    <span className="text-sm font-medium text-transparent bg-clip-text bg-gradient-to-r from-purple-300 via-pink-300 to-purple-300 animate-pulse">
-                                        {thinkingStatus}
-                                    </span>
-                                </div>
+                                )}
                             </div>
+                        ) : (
+                            <>
+                                {messages.map((msg) => (
+                                    <MessageBubble
+                                        key={msg.id}
+                                        message={{ ...msg, content: msg.role === 'user' ? formatUserMessage(msg.content) : msg.content }}
+                                        sessionId={sessionId}
+                                        onFeedbackSubmit={handleFeedbackSubmit}
+                                    />
+                                ))}
+
+                                {thinkingStatus && (
+                                    <div className="flex gap-4 mb-8 px-2 items-center animate-fade-in">
+                                        <div className="w-8 h-8 rounded-full bg-gradient-to-r from-yellow-500 to-orange-600 flex items-center justify-center shadow-lg shadow-yellow-500/20">
+                                            <Sparkles size={16} className="text-white animate-spin-slow" />
+                                        </div>
+                                        <div className="glass px-6 py-3 rounded-2xl rounded-tl-none border border-white/10 bg-white/5 backdrop-blur-md flex items-center gap-3">
+                                            <div className="flex gap-1">
+                                                <span className="w-1.5 h-1.5 bg-yellow-400 rounded-full animate-bounce" style={{ animationDelay: '0s' }}></span>
+                                                <span className="w-1.5 h-1.5 bg-orange-400 rounded-full animate-bounce" style={{ animationDelay: '0.15s' }}></span>
+                                                <span className="w-1.5 h-1.5 bg-yellow-400 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }}></span>
+                                            </div>
+                                            <span className="text-sm font-medium text-transparent bg-clip-text bg-gradient-to-r from-yellow-200 via-orange-200 to-yellow-200 animate-pulse">
+                                                {thinkingStatus}
+                                            </span>
+                                        </div>
+                                    </div>
+                                )}
+                                <div ref={messagesEndRef} />
+                            </>
                         )}
-                        <div ref={messagesEndRef} />
                     </div>
                 </div>
 
-                {/* Input Area */}
-                <div className="flex-none p-4 md:p-6 bg-black/40 border-t border-white/10 backdrop-blur-xl z-10">
-                    {messages.length > 0 && messages[messages.length - 1].role === 'assistant' && (
-                        <div className="flex justify-center mb-4">
-                            <button
-                                onClick={() => handleSendMessage(true)}
+                {/* Input Area (Only visible in Chat Mode) */}
+                {inputMode === 'chat' && (
+                    <div className="flex-none p-4 md:p-6 bg-black/40 border-t border-white/10 backdrop-blur-xl z-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                        {messages.length > 0 && messages[messages.length - 1].role === 'assistant' && (
+                            <div className="flex justify-center mb-4">
+                                <button
+                                    onClick={() => handleSendMessage({ isReload: true })}
+                                    disabled={isLoading}
+                                    className="group flex items-center gap-2 px-5 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-full text-xs font-medium text-gray-300 transition-all hover:scale-105 hover:border-yellow-500/50 hover:text-white hover:shadow-lg hover:shadow-yellow-500/10"
+                                >
+                                    <RefreshCw size={14} className={`group-hover:rotate-180 transition-transform duration-500 ${isLoading ? 'animate-spin' : ''}`} />
+                                    Reload Recommendations
+                                </button>
+                            </div>
+                        )}
+                        <div className="relative flex items-center max-w-4xl mx-auto group">
+                            <input
+                                ref={inputRef}
+                                type="text"
+                                value={input}
+                                onChange={(e) => setInput(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+                                className="w-full bg-gray-900/60 border border-gray-700/50 text-white rounded-full py-4 pl-6 pr-14 focus:outline-none focus:ring-2 focus:ring-yellow-500/50 focus:border-yellow-500/50 placeholder-gray-500 transition-all shadow-inner group-hover:bg-gray-900/80 group-hover:border-gray-600"
                                 disabled={isLoading}
-                                className="group flex items-center gap-2 px-5 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-full text-xs font-medium text-gray-300 transition-all hover:scale-105 hover:border-purple-500/50 hover:text-white hover:shadow-lg hover:shadow-purple-500/10"
+                            />
+                            <button
+                                onClick={() => handleSendMessage()}
+                                disabled={!input.trim() || isLoading}
+                                className="absolute right-2 p-2.5 bg-gradient-to-r from-yellow-500 to-orange-600 rounded-full text-white shadow-lg hover:shadow-yellow-500/40 hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:shadow-none"
                             >
-                                <RefreshCw size={14} className={`group-hover:rotate-180 transition-transform duration-500 ${isLoading ? 'animate-spin' : ''}`} />
-                                Reload Recommendations
+                                <Send size={18} />
                             </button>
                         </div>
-                    )}
-                    <div className="relative flex items-center max-w-4xl mx-auto group">
-                        <input
-                            ref={inputRef}
-                            type="text"
-                            value={input}
-                            onChange={(e) => setInput(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-                            className="w-full bg-gray-900/60 border border-gray-700/50 text-white rounded-full py-4 pl-6 pr-14 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 placeholder-gray-500 transition-all shadow-inner group-hover:bg-gray-900/80 group-hover:border-gray-600"
-                            disabled={isLoading}
-                        />
-                        <button
-                            onClick={() => handleSendMessage()}
-                            disabled={!input.trim() || isLoading}
-                            className="absolute right-2 p-2.5 bg-gradient-to-r from-purple-600 to-pink-600 rounded-full text-white shadow-lg hover:shadow-purple-500/40 hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:shadow-none"
-                        >
-                            <Send size={18} />
-                        </button>
+                        <p className="text-center text-[10px] text-gray-500 mt-3 font-medium tracking-wide">
+                            AI can make mistakes. Please verify product details.
+                        </p>
                     </div>
-                    <p className="text-center text-[10px] text-gray-500 mt-3 font-medium tracking-wide">
-                        AI can make mistakes. Please verify product details.
-                    </p>
-                </div>
+                )}
             </div>
         </div>
     );

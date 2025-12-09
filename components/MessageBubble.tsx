@@ -75,6 +75,7 @@ export default function MessageBubble({ message, sessionId, onFeedbackSubmit }: 
                                 sessionId={sessionId}
                                 messageId={message.id}
                                 onFeedbackSubmit={onFeedbackSubmit}
+                                isToastd={false}
                             />
                         ))}
                     </div>
@@ -83,17 +84,17 @@ export default function MessageBubble({ message, sessionId, onFeedbackSubmit }: 
 
             {/* Message Content (Bottom) */}
             <div className={`flex gap-4 ${isUser ? 'flex-row-reverse' : ''}`}>
-                <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center overflow-hidden ${isUser ? 'bg-purple-600' : 'bg-transparent'}`}>
+                <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center overflow-hidden ${isUser ? 'bg-yellow-600' : 'bg-transparent'}`}>
                     {isUser ? <User size={16} className="text-white" /> : <img src="/logo.png" alt="AI" className="w-full h-full object-cover" />}
                 </div>
 
                 <div className={`flex flex-col flex-1 min-w-0 ${isUser ? 'items-end' : 'items-start'}`}>
                     <div className={`px-5 py-3 rounded-2xl text-sm leading-relaxed max-w-[85%] md:max-w-[75%] ${isUser
-                        ? 'bg-purple-600/20 border border-purple-500/30 text-purple-100 rounded-tr-none'
+                        ? 'bg-yellow-600/20 border border-yellow-500/30 text-yellow-100 rounded-tr-none'
                         : 'glass text-gray-100 rounded-tl-none'
                         }`}>
                         {displayedContent}
-                        {isTyping && <span className="inline-block w-1.5 h-4 ml-1 align-middle bg-purple-400 animate-pulse" />}
+                        {isTyping && <span className="inline-block w-1.5 h-4 ml-1 align-middle bg-yellow-400 animate-pulse" />}
                     </div>
                 </div>
             </div>

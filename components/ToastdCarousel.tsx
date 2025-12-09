@@ -30,6 +30,7 @@ export default function ToastdCarousel({ products, sessionId, messageId, onFeedb
                             messageId={messageId}
                             onFeedbackSubmit={onFeedbackSubmit}
                             variant="compact"
+                            isToastd={true}
                         />
                     </div>
                 ))}

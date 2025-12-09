@@ -7,6 +7,7 @@ import { getEmbedding } from '@/lib/embeddings';
 import toons from '@/lib/toons';
 import { v4 as uuidv4 } from 'uuid';
 import { searchToastd } from '@/lib/toastd-client';
+import { COLLECTION_MAP } from '@/lib/config/guided-mode';
 
 // Helper to get session context (Redis -> DB)
 async function getSessionContext(sessionId: string, messageId: string) {
@@ -65,6 +66,20 @@ async function updateSessionContext(sessionId: string, userMsg: string, assistan
     }
 }
 
+// Helper to parse budget string
+function parseBudget(budget: string) {
+    const clean = (s: string) => parseInt(s.replace(/[^0-9]/g, ''));
+
+    if (!budget) return {};
+    if (budget.includes('Under')) return { max: clean(budget) };
+    if (budget.includes('Above')) return { min: clean(budget) };
+    if (budget.includes('-')) {
+        const [minStr, maxStr] = budget.split('-');
+        return { min: clean(minStr), max: clean(maxStr) };
+    }
+    return {};
+}
+
 export async function POST(req: Request) {
     const encoder = new TextEncoder();
 
@@ -76,7 +91,7 @@ export async function POST(req: Request) {
 
             try {
                 const body = await req.json();
-                const { message, sessionId: providedSessionId, isReload, guestId, reloadCount = 0, excludeIds = [], seenBrands = [] } = body;
+                const { message, sessionId: providedSessionId, isReload, guestId, reloadCount = 0, excludeIds = [], seenBrands = [], is_guided = false } = body;
 
                 let sessionId = providedSessionId;
                 let isNewSession = false;
@@ -87,14 +102,14 @@ export async function POST(req: Request) {
                     isNewSession = true;
                     await pool.query(
                         'INSERT INTO sessions (id, session_name, guest_id) VALUES ($1, $2, $3)',
-                        [sessionId, message.substring(0, 50), guestId]
+                        [sessionId, is_guided ? 'Guided Search' : message.substring(0, 50), guestId]
                     );
                 } else {
                     const sessionCheck = await pool.query('SELECT id FROM sessions WHERE id = $1', [sessionId]);
                     if (sessionCheck.rows.length === 0) {
                         await pool.query(
                             'INSERT INTO sessions (id, session_name, guest_id) VALUES ($1, $2, $3)',
-                            [sessionId, message.substring(0, 50), guestId]
+                            [sessionId, is_guided ? 'Guided Search' : message.substring(0, 50), guestId]
                         );
                         isNewSession = true;
                     }
@@ -103,8 +118,8 @@ export async function POST(req: Request) {
                 // 2. Store User Message
                 const messageId = uuidv4();
                 await pool.query(
-                    'INSERT INTO messages (id, session_id, user_content, is_reload) VALUES ($1, $2, $3, $4)',
-                    [messageId, sessionId, message, isReload || false]
+                    'INSERT INTO messages (id, session_id, user_content, is_reload, is_guided) VALUES ($1, $2, $3, $4, $5)',
+                    [messageId, sessionId, message, isReload || false, is_guided]
                 );
 
                 sendStatus("Thinking...");
@@ -112,48 +127,90 @@ export async function POST(req: Request) {
                 // 3. Retrieve Context
                 const history = await getSessionContext(sessionId, messageId);
 
-                // 4. Intent Analysis
-                sendStatus("Analyzing your request...");
-                const intentCompletion = await openai.chat.completions.create({
-                    model: 'gpt-4o-mini',
-                    messages: [
-                        {
-                            role: 'system',
-                            content: `You are an AI assistant helping with gift recommendations. 
-                            Analyze the user's message AND the conversation history to extract preferences.
-                            
-                            CONTEXT AWARENESS:
-                            - If the user is refining a previous request, MERGE with previous preferences.
-                            - If the user changes the topic, DISCARD previous product preferences.
-                            - Identify if critical info is missing: Who is it for? What is the occasion? What are their hobbies/interests? What is the budget?
-                            
-                            Return a JSON object with:
-                            - search_query: A refined query for vector search. EXPAND this with synonyms to improve recall (e.g. "bottom wear" -> "bottom wear pants trousers skirts shorts").
-                            - target_collection: "girlfriends", "boyfriends", "products". Default "products".
-                            - preferences: { price_min, price_max, ... }.
-                            - missing_info: [] (List of missing critical info fields).
-                            - needs_clarification: boolean.
-                            `
-                        },
-                        {
-                            role: 'user',
-                            content: `History: ${JSON.stringify(history)}\n\nCurrent Message: ${message}`
-                        }
-                    ],
-                    response_format: { type: 'json_object' }
-                });
+                // 4. Intent Analysis (Skip if Guided)
+                let searchQuery = message;
+                let targetCollection = 'products';
+                let priceMin: number | undefined;
+                let priceMax: number | undefined;
+                let intentData: any = {};
 
-                const intentData = JSON.parse(intentCompletion.choices[0].message.content || '{}');
-                const searchQuery = intentData.search_query || message;
-                const targetCollection = intentData.target_collection || 'products';
-                const { price_min, price_max } = intentData.preferences || {};
+                if (is_guided) {
+                    sendStatus("Processing guided preferences...");
+                    const guidedData = JSON.parse(message);
+
+                    // Map recipient to collection
+                    const recipientKey = guidedData.recipient?.toLowerCase();
+                    targetCollection = COLLECTION_MAP[recipientKey] || 'products';
+
+                    // Construct search query from categories and aesthetics
+                    const categories = guidedData.productTypes?.join(' ') || '';
+                    const aesthetics = guidedData.aesthetics?.join(' ') || '';
+                    searchQuery = `${categories} ${aesthetics}`;
+
+                    // Parse budget
+                    const budgetRange = parseBudget(guidedData.budget);
+                    priceMin = budgetRange.min;
+                    priceMax = budgetRange.max;
+
+                    intentData = {
+                        search_query: searchQuery,
+                        target_collection: targetCollection,
+                        preferences: { price_min: priceMin, price_max: priceMax }
+                    };
+
+                } else {
+                    sendStatus("Analyzing your request...");
+                    const validCollections = Object.values(COLLECTION_MAP).join('", "');
+                    const intentCompletion = await openai.chat.completions.create({
+                        model: 'gpt-4o-mini',
+                        messages: [
+                            {
+                                role: 'system',
+                                content: `You are an AI assistant helping with gift recommendations. 
+                                Analyze the user's message AND the conversation history to extract preferences.
+                                
+                                CONTEXT AWARENESS:
+                                - If the user is refining a previous request, MERGE with previous preferences.
+                                - If the user changes the topic, DISCARD previous product preferences.
+                                - Identify if critical info is missing: Who is it for? What is the occasion? What are their hobbies/interests? What is the budget?
+                                
+                                Return a JSON object with:
+                                - search_query: A refined query for vector search. EXPAND this with synonyms to improve recall (e.g. "bottom wear" -> "bottom wear pants trousers skirts shorts").
+                                - target_collection: One of ["${validCollections}", "products"]. Default "products".
+                                - preferences: { price_min, price_max, ... }.
+                                - missing_info: [] (List of missing critical info fields).
+                                - needs_clarification: boolean.
+                                `
+                            },
+                            {
+                                role: 'user',
+                                content: `History: ${JSON.stringify(history)}\n\nCurrent Message: ${message}`
+                            }
+                        ],
+                        response_format: { type: 'json_object' }
+                    });
+
+                    intentData = JSON.parse(intentCompletion.choices[0].message.content || '{}');
+                    searchQuery = intentData.search_query || message;
+                    targetCollection = intentData.target_collection || 'products';
+
+                    // Validate targetCollection
+                    const allowedCollections = [...Object.values(COLLECTION_MAP), 'products'];
+                    if (!allowedCollections.includes(targetCollection)) {
+                        targetCollection = 'products';
+                    }
+
+                    const prefs = intentData.preferences || {};
+                    priceMin = prefs.price_min;
+                    priceMax = prefs.price_max;
+                }
 
                 // 5. Vector Search with Fallback
                 let products: any[] = [];
                 const embedding = await getEmbedding(searchQuery);
                 const filter: any = {};
-                if (price_min !== undefined || price_max !== undefined) {
-                    filter.must = [{ key: "price_numeric", range: { gte: price_min || 0, lte: price_max || 1000000 } }];
+                if (priceMin !== undefined || priceMax !== undefined) {
+                    filter.must = [{ key: "price_numeric", range: { gte: priceMin || 0, lte: priceMax || 1000000 } }];
                 }
 
                 // Exclude seen products
@@ -259,10 +316,10 @@ export async function POST(req: Request) {
                 let toastdProducts: any[] = [];
                 try {
                     // Use the FastAPI toastd search client for better semantic search
-                    const toastdResponse = await searchToastd(message, {
+                    const toastdResponse = await searchToastd(searchQuery, {
                         limit: 10,
-                        priceMin: intentData.preferences?.priceMin,
-                        priceMax: intentData.preferences?.priceMax
+                        priceMin: priceMin,
+                        priceMax: priceMax
                     });
 
                     // Transform toastd results to match expected format
@@ -337,7 +394,7 @@ export async function POST(req: Request) {
                     messages: [
                         { role: 'system', content: systemPrompt },
                         ...history.map((msg: any) => [{ role: 'user', content: msg.user }, { role: 'assistant', content: msg.assistant }]).flat(), // Inject history
-                        { role: 'user', content: message }
+                        { role: 'user', content: is_guided ? `Guided Search Request: ${searchQuery}` : message }
                     ]
                 });
 
@@ -349,7 +406,7 @@ export async function POST(req: Request) {
                     'UPDATE messages SET assistant_content = $1, product = $2 WHERE id = $3',
                     [assistantResponse, allProductsToStore.map(p => JSON.stringify(p)), messageId]
                 );
-                await updateSessionContext(sessionId, message, assistantResponse);
+                await updateSessionContext(sessionId, is_guided ? searchQuery : message, assistantResponse);
 
                 // 8. Send Final Data
                 controller.enqueue(encoder.encode(JSON.stringify({

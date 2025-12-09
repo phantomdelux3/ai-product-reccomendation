@@ -21,9 +21,10 @@ interface ProductCardProps {
     messageId: string;
     onFeedbackSubmit: (data: any) => void;
     variant?: 'default' | 'compact';
+    isToastd?: boolean;
 }
 
-export default function ProductCard({ product, sessionId, messageId, onFeedbackSubmit, variant = 'default' }: ProductCardProps) {
+export default function ProductCard({ product, sessionId, messageId, onFeedbackSubmit, variant = 'default', isToastd = false }: ProductCardProps) {
     const [showMenu, setShowMenu] = useState(false);
     const [showFeedback, setShowFeedback] = useState(false);
     const [showDescription, setShowDescription] = useState(false);
@@ -38,6 +39,10 @@ export default function ProductCard({ product, sessionId, messageId, onFeedbackS
             productTitle: product.title
         });
     };
+
+    const productLink = isToastd
+        ? product.product_url
+        : `${product.product_url}${product.product_url.includes('?') ? '&' : '?'}utm=from-toastd`;
 
     return (
         <>
@@ -98,7 +103,7 @@ export default function ProductCard({ product, sessionId, messageId, onFeedbackS
 
                     <div className="mt-auto pt-3">
                         <a
-                            href={product.product_url}
+                            href={productLink}
                             target="_blank"
                             rel="noopener noreferrer"
                             className={`flex items-center justify-center gap-2 w-full ${isCompact ? 'py-1.5' : 'py-2'} bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg ${isCompact ? 'text-[10px]' : 'text-xs'} font-medium text-gray-300 transition-colors`}

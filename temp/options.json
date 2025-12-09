@@ -1,0 +1,109 @@
+{
+  "options": [
+    {
+      "id": "Plushies",
+      "label": "Plushies",
+      "subOptions": [
+        "Shark",
+        "Husky Cuddle Pillow",
+        "Bear",
+        "Cat Plushie",
+        "Penguin",
+        "Cuddle Pillow",
+        "Goose Cuddle Pillow",
+        "Mimi Plushie"
+      ]
+    },
+    {
+      "id": "Skincare",
+      "label": "Skincare",
+      "subOptions": [
+        "Body Oil",
+        "Argan Oil Shampoo",
+        "Shampoo",
+        "Moisturizer",
+        "Face Serum",
+        "Face Wash",
+        "Hand Cream",
+        "Soap Bar",
+        "Shower Gel"
+      ]
+    },
+    {
+      "id": "Apparel",
+      "label": "Apparel",
+      "subOptions": [
+        "T-shirt",
+        "Blouse",
+        "Shoes",
+        "Crossbody Bag",
+        "Bucket Bag",
+        "Hobo Bag",
+        "Clutch",
+        "Messenger Bag",
+        "Pants",
+        "Sneakers"
+      ]
+    },
+    {
+      "id": "Hair Care",
+      "label": "Hair Care",
+      "subOptions": [
+        "Shampoo and Conditioner Set",
+        "Conditioner",
+        "Hair Mask",
+        "Hair Oil",
+        "Rosemary Hair Oil",
+        "Scalp Routine",
+        "Scalp Scrub"
+      ]
+    },
+    {
+      "id": "Travel Accessories",
+      "label": "Travel Accessories",
+      "subOptions": [
+        "Passport Wallet",
+        "Cosmetic Case",
+        "Toiletry Bag",
+        "Pouch",
+        "Kit",
+        "Bag",
+        "Duffel Bag"
+      ]
+    },
+    {
+      "id": "Jewelry",
+      "label": "Jewelry",
+      "subOptions": [
+        "Earrings",
+        "Necklace",
+        "Pendant Necklace"
+      ]
+    },
+    {
+      "id": "Toys",
+      "label": "Toys",
+      "subOptions": [
+        "Plushies and Stickers",
+        "Lollipops",
+        "Jigsaw Puzzle Set",
+        "Plushie Keychain"
+      ]
+    },
+    {
+      "id": "Home Decor",
+      "label": "Home Decor",
+      "subOptions": [
+        "Custom Rug",
+        "Tripod Floor Lamp",
+        "Sofa Bed",
+        "Pillow",
+        "Floor Lamp",
+        "Wall Decoration",
+        "Candle",
+        "Wall Art",
+        "Clock"
+      ]
+    }
+  ]
+}

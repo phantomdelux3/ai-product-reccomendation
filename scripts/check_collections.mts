@@ -13,7 +13,7 @@ const qdrantClient = new QdrantClient({
 });
 
 async function main() {
-    const collections = ['products', 'girlfriends', 'boyfriends'];
+    const collections = ['products', 'girlfriends', 'boyfriends', 'girlfriend', 'boyfriend', 'mom', 'dad', 'friend', 'colouge', 'colleagues'];
 
     for (const name of collections) {
         try {

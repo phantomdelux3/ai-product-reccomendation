@@ -109,7 +109,51 @@ The API will start on http://localhost:8001
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000)
+### 5. Data Ingestion (Toastd Collection)
+
+To process and upsert products into the `toastd` collection with AI-powered analysis and categorization:
+
+#### 1. Prerequisites (Ollama)
+Ensure you have [Ollama](https://ollama.com) installed and running. Pull the required models:
+
+```bash
+ollama pull llava        # For image analysis
+ollama pull llama3.2     # For categorization
+```
+
+#### 2. Set up Python Environment
+
+```powershell
+cd scripts
+python -m venv venv
+.\venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+#### 2. Run the Upsert Script
+
+Once the environment is set up and activated:
+
+```powershell
+python upsert_toastd.py
+```
+
+**What this script does:**
+- **Recreates Collection**: Deletes and recreates the `toastd` collection (384 dim).
+- **Visual Analysis**: Uses **Florence-2 (CUDA)** to generate detailed visual descriptions of product images.
+- **Categorization**: Uses **Ollama (Llama 3.2)** to categorize products into:
+    - **Recipients**: (Boyfriend, Girlfriend, Mom, Dad, etc.)
+    - **Product Type**: (Home Decor, Apparel, Gadgets, etc.)
+- **URL Formatting**: Formats product URLs as `https://www.toastd.in/product/<slug>`.
+- **Upsert**: Stores rich metadata in Qdrant for semantic search.
+
+### 6. Guided Mode
+
+The application now features a **Guided Mode** integrated directly into the Chat Interface.
+
+- **Switching Modes**: Toggle between "Prompt" and "Guided" modes on the New Chat screen.
+- **Mobile Wizard**: On mobile, Guided Mode presents a step-by-step wizard (Recipient -> Type -> Aesthetic -> Budget).
+- **Integration**: Selections in Guided Mode automatically trigger a tailored search in the Chat Interface.
 
 ## Testing
 

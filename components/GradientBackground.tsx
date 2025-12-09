@@ -35,8 +35,8 @@ export default function GradientBackground() {
                     rotationY={130}
                     rotationZ={70}
                     color1='#000000'
-                    color2='#4c1d95'
-                    color3='#db2777'
+                    color2='#ca8a04'
+                    color3='#facc15'
                     reflection={0.4}
                     // View (camera) props
                     cAzimuthAngle={270}

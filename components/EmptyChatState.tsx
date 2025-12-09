@@ -55,13 +55,13 @@ export default function EmptyChatState() {
     }, { scope: containerRef });
 
     return (
-        <div ref={containerRef} className="h-full flex flex-col items-center justify-center text-center p-8 animate-in fade-in zoom-in duration-700">
+        <div ref={containerRef} className="w-full flex flex-col items-center text-center p-8 animate-in fade-in zoom-in duration-700">
             <div id="main-logo" className="w-64 md:w-80 mb-8 opacity-0">
                 <img src="/toastdlogo.png" alt="Toastd" className="w-full h-auto drop-shadow-2xl" />
             </div>
             <h2 className="flex flex-col items-center text-4xl md:text-6xl font-bold text-white mb-6 tracking-tight gap-3">
                 <span className="opacity-90">Find gifts for</span>
-                <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-pink-500 to-purple-400 h-[1.3em] pb-2" id="rotating-text">your Girlfriend</span>
+                <span className="text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 via-orange-500 to-yellow-400 h-[1.3em] pb-2" id="rotating-text">your Girlfriend</span>
             </h2>
             <p className="text-gray-400 max-w-md text-lg md:text-xl leading-relaxed font-light">
                 I can help you find the perfect gift based on occasion, interests, and budget.
